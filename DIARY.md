@@ -2,7 +2,9 @@
 
 > **Last Updated**: August 4, 2026  
 > **Build Status**: ✅ All 3 plugins compiling, 24/24 tests passing  
-> **Branch**: `main` | **Commit**: `1687d56`
+> **Branch**: `main` | **Commit**: `61c063a`
+
+> **📚 Companion Docs**: [STEPS.md](STEPS.md) (step-by-step log) · [SUGGEST.md](SUGGEST.md) (suggestions catalog) · [TIMELINE.md](TIMELINE.md) (roadmap)
 
 ---
 

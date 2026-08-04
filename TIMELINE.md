@@ -1,7 +1,7 @@
 # MineDrop Network — Development Timeline
 
 > **Purpose**: Visual roadmap of everything we've built, are building, and will build.  
-> **Last Updated**: August 4, 2026
+> **Last Updated**: August 4, 2026 (night)
 
 ---
 
@@ -10,14 +10,14 @@
 ```
 2026-08-04 ────────────────────────────────────────────────────────────────► Future
 
-[Phase 0]    [Phase 1]        [Phase 2]         [Phase 3]          [Phase 4]
-Analysis  →  Foundation  →  Prod Hardening  →  Resilience  →  DLQ + Docs
- (30 min)     (3 hours)       (2 hours)         (1.5 hours)      (1 hour)
-              ✅ Done          ✅ Done           ✅ Done           ✅ Done
+[Phase 0]    [Phase 1]        [Phase 2]         [Phase 3]          [Phase 4]   [Phase 5]    [Phase 6]         [Phase 7]
+Analysis  →  Founda... →  Resilience  →  DLQ+Doc  →  Startup Fix  →  Redis+JAR  →  JSON Dedup
+ (30 min)     (3 hours)       (2 hours)      (1.5h)    (1 hour)        (1.5h)        (20 min)
+              ✅ Done     ✅ Done       ✅ Done      ✅ Done         ✅ Done        ✅ Done
 
-                                                    ▼
-                                           [Phase 5] ────► [Phase 6] ────► [Phase 7]
-                                            Planned         Future           Dreams
+                                                                              ▼
+                                                                     [Phase 8] ────► [Phase 9]
+                                                                      Planned         Dreams
 ```
 
 ---
@@ -103,6 +103,59 @@ Status: ✅ 24/24 tests passing, all 3 plugins building
 **Date**: August 4, 2026  
 **Commit**: `61c063a` (6 files, 914 additions)
 
+---
+
+### Phase 5 — Startup Lifecycle Fixes
+**Duration**: ~1 hour  
+**Date**: August 4, 2026  
+**Commit**: `847745f` (6 files modified)
+
+```
+Critical fixes from real server logs:
+  ✅ PacketDispatcher NPE           (reordered Steps 7-8 in CorePaperPlugin)
+  ✅ CoreVelocity MDNAPI not init   (added MDNAPI.initialize() before PlayerCache)
+  ✅ BridgeManager Jackson coupling (standalone ObjectMapper, removed MDNAPI dep)
+  ✅ Redis health false-negatives   (dedicated healthCheckExecutor, not ForkJoinPool)
+  ✅ onDisable() Redis thread leak  (added redisManager.shutdown())
+  ✅ DEPLOY.md created              (complete Pterodactyl + VPS-direct guide)
+
+Status: ✅ All 3 plugins compiling, real-server ready
+```
+
+---
+
+### Phase 6 — Redis Connection Reset & Shadow JAR Build Fix
+**Duration**: ~1.5 hours  
+**Date**: August 4, 2026  
+**Commit**: `dddaa76` (4 files, 23 insertions)
+
+```
+Critical fixes from real server logs:
+  ✅ JedisPoolConfig validation     (testOnCreate/Borrow/WhileIdle, eviction timing)
+  ✅ Shadow JAR overwrite on clean  (archiveClassifier="original" on jar task)
+  ✅ MDN-Bridge NoClassDefFoundError(ded Jackson deps + build fix)
+  ✅ Bridge JAR: 19KB → 4.0MB       (Jackson now properly bundled)
+
+Status: ✅ Both JARs 4.0MB, all deps bundled
+```
+
+---
+
+### Phase 7 — Duplicate velocity-plugin.json Fix
+**Duration**: ~20 minutes  
+**Date**: August 4, 2026 (night)  
+**Commit**: `ae71f4f` (4 files, 4 insertions, 33 deletions)
+
+```
+Build quality fix:
+  ✅ Deleted manual velocity-plugin.json templates (both bridge + core)
+  ✅ Velocity annotation processor now sole source of truth
+  ✅ jar tf | grep velocity-plugin → 1 entry (was 2)
+  ✅ Removed processResources expand blocks for velocity-plugin.json
+
+Status: ✅ Clean build — no duplicate resources
+```
+
 ```
 New systems:
   ✅ Dead Letter Queue         (5 retries, exponential backoff 1s→16s, permanent DLQ)
@@ -121,7 +174,7 @@ Status: ✅ Complete Phase 4
 
 ---
 
-## 🔜 Upcoming — Phase 5 (Planned)
+## 🔜 Upcoming — Phase 8 (Planned)
 
 **Target**: Next development session  
 **Focus**: Rate Limiting + Graceful Degradation
@@ -139,7 +192,7 @@ Estimated effort: 2-3 hours
 
 ---
 
-## 📋 Phase 6 — Future (Medium Term)
+## 📋 Phase 9 — Future (Medium Term)
 
 **Focus**: Monitoring + Developer Tools
 
@@ -156,7 +209,7 @@ Estimated effort: 4-6 hours
 
 ---
 
-## 🌟 Phase 7 — Dreams (Long Term)
+## 🌟 Phase 10 — Dreams (Long Term)
 
 **Focus**: Scale + High Availability
 
@@ -177,16 +230,16 @@ Estimated effort: 8-12 hours (spread across weeks)
 
 | Metric | Count |
 |--------|-------|
-| Total commits | 3 |
-| Total files created | 93 |
+| Total commits | 6 |
+| Total files created | 94 |
 | Total source lines | ~5,700 |
 | Total test lines | ~400 |
-| Build errors encountered & fixed | 12 |
+| Build errors encountered & fixed | 13 |
 | Unit tests passing | 24/24 |
 | Plugins fully implemented | 3 (mdn-api, mdn-bridge, mdn-core) |
 | Plugins as skeletons | 7 |
 | Suggestions cataloged | 41 |
-| Documentation pages | 5 (README, DIARY, STEPS, SUGGEST, TIMELINE) |
+| Documentation pages | 8 (README, DIARY, STEPS, SUGGEST, TIMELINE, DEPLOY, FIX-GUIDE, ISSUES) |
 
 ---
 

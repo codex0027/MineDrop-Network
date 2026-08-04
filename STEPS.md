@@ -2,7 +2,7 @@
 
 > **Purpose**: Every single change — no matter how small — is logged here chronologically.  
 > **For**: New developers onboarding, debugging "why was this done this way", and auditing changes.  
-> **Last Updated**: August 4, 2026 (evening — Redis + Bridge shadow JAR fixes)
+> **Last Updated**: August 4, 2026 (night — velocity-plugin.json deduplication)
 
 ---
 
@@ -386,6 +386,54 @@ Making it explicit guarantees inclusion regardless of Gradle resolution quirks.
 
 ---
 
+## Phase 7 — Duplicate velocity-plugin.json Fix (Commit: `ae71f4f`)
+
+### Step 7.1 — Shadow JAR Contains Two Copies of velocity-plugin.json
+
+**Root cause**: Both the Velocity `@Plugin` annotation processor AND a manual template
+in `src/main/resources/velocity-plugin.json` were producing the same file. The annotation
+processor auto-generates `velocity-plugin.json` from `@Plugin(id, name, version, authors, dependencies)`
+into `build/classes/java/main/`. The `processResources` task expanded the manual template
+into `build/resources/main/`. The shadow JAR picked up **both** copies.
+
+**Symptoms**:
+- `jar tf ... | grep velocity-plugin` returned 2 entries
+- `unzip -p` printed two concatenated JSON documents (174 bytes + 274 bytes)
+- Could cause Velocity to read the wrong (unexpanded) copy
+
+**Why this is a bug**: The `@Plugin` annotation is the canonical source of truth for
+Velocity metadata. A manual template duplicates this responsibility and creates
+race-condition-like ambiguity about which copy Velocity actually reads at runtime.
+
+| # | Change | File | Details |
+|---|--------|------|---------|
+| 85 | Deleted manual template | `mdn-bridge/src/main/resources/velocity-plugin.json` | The `@Plugin` annotation on `BridgeVelocityPlugin` already has all metadata (id=mdn-bridge, name=MDN-Bridge, version, authors). The annotation processor generates `velocity-plugin.json` from this — no manual template needed. |
+| 86 | Deleted manual template | `mdn-core/src/main/resources/velocity-plugin.json` | The `@Plugin` annotation on `CoreVelocityPlugin` has all metadata including `@Dependency(id = "mdn-bridge")`. Auto-generated copy correctly includes `"dependencies":[{"id":"mdn-bridge","optional":false}]`. |
+| 87 | Removed expand blocks | `mdn-bridge/build.gradle.kts` + `mdn-core/build.gradle.kts` | Replaced `filesMatching("velocity-plugin.json") { expand(...) }` blocks with comments explaining the annotation processor handles it. The `expand()` calls had no effect after the template files were deleted. |
+
+### Step 7.2 — Verification
+
+| Check | Before | After |
+|-------|--------|-------|
+| Bridge JAR velocity-plugin entries | 2 (174B + 274B) | **1** ✅ |
+| Core JAR velocity-plugin entries | 2 (duplicate) | **1** ✅ |
+| Bridge content | Two concatenated JSON docs | Single valid JSON: `{"id":"mdn-bridge",...}` ✅ |
+| Core content | Two concatenated JSON docs | Single valid JSON with dependencies `[{"id":"mdn-bridge"}]` ✅ |
+| Bridge dependencies | Missing from annotation copy | Included: `"dependencies":[]` ✅ |
+| Core dependencies | Correctly reflects `@Dependency(id="mdn-bridge")` | Unchanged — was already correct ✅ |
+| All 3 plugins build + tests | PASS | PASS ✅ |
+
+### Step 7.3 — Files Changed
+
+| File | Change |
+|------|--------|
+| `mdn-bridge/src/main/resources/velocity-plugin.json` | **Deleted** (8 lines) |
+| `mdn-core/src/main/resources/velocity-plugin.json` | **Deleted** (9 lines) |
+| `mdn-bridge/build.gradle.kts` | Removed `filesMatching("velocity-plugin.json")` expand block, added comment (−10/+2 lines) |
+| `mdn-core/build.gradle.kts` | Removed `filesMatching("velocity-plugin.json")` expand block, added comment (−10/+2 lines) |
+
+---
+
 ## Summary Statistics
 
 ### By Phase
@@ -398,7 +446,8 @@ Making it explicit guarantees inclusion regardless of Gradle resolution quirks.
 | Phase 4 (DLQ + Docs) | 1 | 5 | 4 | 1 |
 | Phase 5 (Startup Fixes) | 1 | 1 | 6 | 0 |
 | Phase 6 (Redis + Shadow Fix) | 1 | 0 | 4 | 0 |
-| **Total** | **5** | **94** | **35** | **12** |
+| Phase 7 (Velocity JSON Dedup) | 1 | 0 | 2 | 0 |
+| **Total** | **6** | **94** | **37** | **12** |
 
 *Phase 2 was bundled with Phase 1 commit
 
@@ -410,7 +459,9 @@ Making it explicit guarantees inclusion regardless of Gradle resolution quirks.
 | mdn-core | 15 | 1 | 2 | 18 |
 | 7 skeletons | 14 | 0 | 0 | 14 |
 | Root docs | DIARY, STEPS, SUGGEST, TIMELINE, README, DEPLOY, FIX-GUIDE, ISSUES | — | — | 8 |
-| **Total** | **49** | **3** | **5** | **65** |
+| **Total** | **49** | **3** | **3** | **63** |
+
+*Note: Two config files (velocity-plugin.json) were removed in Phase 7 — Velocity metadata is now 100% annotation-driven.*
 
 ---
 

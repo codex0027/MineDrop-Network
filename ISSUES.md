@@ -1,8 +1,9 @@
 # MineDrop Network — Issues & Improvement Audit
 
 > **Purpose**: Every issue, bug, gap, code smell, and improvement opportunity found during deep analysis.  
-> **Status**: ✅ **ALL 36 ISSUES FIXED** — August 4, 2026  
+> **Status**: ✅ **ALL 36 ISSUES + 1 BUILD ISSUE FIXED** — August 4, 2026  
 > **Last Deep Audit**: August 4, 2026  
+> **Last Fix**: August 4, 2026 (night) — velocity-plugin.json deduplication
 > **Files Audited**: 30 source files across mdn-api, mdn-bridge, mdn-core
 
 ---
@@ -15,7 +16,13 @@
 | 🟠 High | 12 | 12 ✅ | 0 |
 | 🟡 Medium | 14 | 14 ✅ | 0 |
 | 🟢 Low | 7 | 7 ✅ | 0 |
-| **Total** | **36** | **36** | **0** |
+| **Total** | **37** | **37** | **0** |
+
+### Additional Build Issue (Post-Audit)
+
+| ID | Severity | Issue | Fix |
+|----|----------|-------|-----|
+| B-1 | 🟠 | Shadow JAR contains TWO copies of velocity-plugin.json | Deleted manual templates in `src/main/resources/`; Velocity @Plugin annotation processor is now sole source of truth. Removed `filesMatching("velocity-plugin.json")` expand blocks from both build.gradle.kts.
 
 ### Resolution Table
 
@@ -36,6 +43,7 @@
 | H-10 | 🟠 | Broken JSON in inventory | Uses Jackson ObjectMapper for proper JSON |
 | H-11 | 🟠 | Health scoring missing staleness | Added staleness + latency to isHealthy() and healthScore |
 | H-12 | 🟠 | Signature file sync read | Acceptable (< 1KB) — noted for completeness |
+| B-1 | 🟠 | Duplicate velocity-plugin.json in shadow JAR | Deleted manual templates — annotation processor now sole source |
 | M-1 | 🟡 | Missing @JsonIgnoreProperties | Added to MDNPacket base class (cascades to subclasses) |
 | M-2 | 🟡 | MessageDigest reinstantiation | Added ThreadLocal<MessageDigest> caching |
 | M-3 | 🟡 | Missing migration table | Added mdn_schema_migrations table |
@@ -82,6 +90,8 @@ mdn-core/src/main/java/net/minedrop/core/util/CircuitBreaker.java     (M-6)
 mdn-core/src/main/java/net/minedrop/core/sync/DataSyncEngine.java     (M-11)
 mdn-core/src/main/java/net/minedrop/core/sync/InventorySyncManager.java (H-10)
 mdn-core/src/main/java/net/minedrop/core/registry/ServerRegistry.java (H-11)
+mdn-bridge/build.gradle.kts                                (B-1)
+mdn-core/build.gradle.kts                                  (B-1)
 ```
 
 ---

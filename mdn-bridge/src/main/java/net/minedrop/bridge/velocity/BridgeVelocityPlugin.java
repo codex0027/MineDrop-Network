@@ -4,7 +4,6 @@ import com.google.inject.Inject;
 import com.velocitypowered.api.event.Subscribe;
 import com.velocitypowered.api.event.proxy.ProxyInitializeEvent;
 import com.velocitypowered.api.plugin.Plugin;
-import com.velocitypowered.api.plugin.PluginManager;
 import com.velocitypowered.api.proxy.ProxyServer;
 import net.minedrop.bridge.BridgeManager;
 import org.slf4j.Logger;
@@ -45,6 +44,9 @@ public final class BridgeVelocityPlugin {
     public void onProxyInitialize(ProxyInitializeEvent event) {
         bridgeManager = BridgeManager.getInstance();
 
+        // ── Ensure config exists (copy from JAR if missing) ──
+        saveDefaultConfig();
+
         // ── Load configuration ──
         loadConfiguration();
 
@@ -66,6 +68,43 @@ public final class BridgeVelocityPlugin {
         logger.info("MDN-Bridge Velocity initialized.");
         logger.info("Server identity: {}", bridgeManager.getServerIdentity());
         logger.info("Listening for handshake challenges on mdn:bridge:handshake...");
+    }
+
+    // ── Default config bootstrap ──
+
+    /**
+     * Creates the plugin data directory and copies the Velocity-specific
+     * default config (config-velocity.yml) from the JAR resources to disk
+     * as config.yml, mirroring Paper's saveDefaultConfig() behavior.
+     * <p>
+     * The JAR bundles two config files:
+     * <ul>
+     *   <li>{@code config.yml} — Paper server config</li>
+     *   <li>{@code config-velocity.yml} — Velocity proxy config</li>
+     * </ul>
+     * On Velocity, we use config-velocity.yml as the default source
+     * but save it as config.yml so the loader always reads the same filename.
+     */
+    private void saveDefaultConfig() {
+        Path configDir = Path.of("plugins", "mdn-bridge");
+        Path configFile = configDir.resolve("config.yml");
+
+        if (Files.exists(configFile)) return; // already exists, don't overwrite
+
+        try {
+            Files.createDirectories(configDir);
+            // Use config-velocity.yml (Velocity-specific defaults) as the source
+            try (InputStream in = getClass().getClassLoader().getResourceAsStream("config-velocity.yml")) {
+                if (in != null) {
+                    Files.copy(in, configFile);
+                    logger.info("Default config.yml created at {} (from config-velocity.yml)", configFile.toAbsolutePath());
+                } else {
+                    logger.warn("No default config-velocity.yml found in JAR resources");
+                }
+            }
+        } catch (IOException e) {
+            logger.error("Failed to create default config.yml", e);
+        }
     }
 
     /**

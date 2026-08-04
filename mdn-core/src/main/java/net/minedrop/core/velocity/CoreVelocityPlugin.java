@@ -2,7 +2,6 @@ package net.minedrop.core.velocity;
 
 import com.google.inject.Inject;
 import com.velocitypowered.api.command.CommandManager;
-import com.velocitypowered.api.command.CommandMeta;
 import com.velocitypowered.api.command.SimpleCommand;
 import com.velocitypowered.api.event.Subscribe;
 import com.velocitypowered.api.event.connection.DisconnectEvent;
@@ -74,6 +73,9 @@ public final class CoreVelocityPlugin {
     @Subscribe
     public void onProxyInitialize(ProxyInitializeEvent event) {
         logger.info("MDN-Core Velocity initializing...");
+
+        // ── Ensure config exists (copy from JAR if missing) ──
+        saveDefaultConfig();
 
         // ── Load config ──
         loadConfiguration();
@@ -161,6 +163,43 @@ public final class CoreVelocityPlugin {
         );
     }
 
+    // ── Default config bootstrap ──
+
+    /**
+     * Creates the plugin data directory and copies the Velocity-specific
+     * default config (config-velocity.yml) from the JAR resources to disk
+     * as config.yml, mirroring Paper's saveDefaultConfig() behavior.
+     * <p>
+     * The JAR bundles two config files:
+     * <ul>
+     *   <li>{@code config.yml} — Paper server config (with MySQL settings)</li>
+     *   <li>{@code config-velocity.yml} — Velocity proxy config (Redis-only)</li>
+     * </ul>
+     * On Velocity, we use config-velocity.yml as the default source
+     * but save it as config.yml so the loader always reads the same filename.
+     */
+    private void saveDefaultConfig() {
+        Path configDir = Path.of("plugins", "mdn-core");
+        Path configFile = configDir.resolve("config.yml");
+
+        if (Files.exists(configFile)) return; // already exists, don't overwrite
+
+        try {
+            Files.createDirectories(configDir);
+            // Use config-velocity.yml (Velocity-specific, no database section) as the source
+            try (InputStream in = getClass().getClassLoader().getResourceAsStream("config-velocity.yml")) {
+                if (in != null) {
+                    Files.copy(in, configFile);
+                    logger.info("Default config.yml created at {} (from config-velocity.yml)", configFile.toAbsolutePath());
+                } else {
+                    logger.warn("No default config-velocity.yml found in JAR resources");
+                }
+            }
+        } catch (IOException e) {
+            logger.error("Failed to create default config.yml", e);
+        }
+    }
+
     // ── Configuration loading (SnakeYAML) ──
 
     @SuppressWarnings("unchecked")
@@ -184,10 +223,16 @@ public final class CoreVelocityPlugin {
                 redisPassword = String.valueOf(redis.getOrDefault("password", redisPassword));
             }
 
-            // Parse network config
+            // Parse network config (Paper layout: network.default-region)
             Map<String, Object> network = (Map<String, Object>) root.get("network");
-            if (network != null) {
-                defaultRegion = String.valueOf(network.getOrDefault("default-region", defaultRegion));
+            if (network != null && network.containsKey("default-region")) {
+                defaultRegion = String.valueOf(network.get("default-region"));
+            }
+
+            // Parse routing config (Velocity layout: routing.default-region)
+            Map<String, Object> routing = (Map<String, Object>) root.get("routing");
+            if (routing != null && routing.containsKey("default-region")) {
+                defaultRegion = String.valueOf(routing.get("default-region"));
             }
 
             logger.info("Config loaded: redis={}:{}, region={}", redisHost, redisPort, defaultRegion);

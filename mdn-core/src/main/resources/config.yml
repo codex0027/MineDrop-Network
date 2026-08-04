@@ -1,21 +1,25 @@
 # =============================================================================
-# MDN-Core Configuration
+# MDN-Core Paper Configuration
 # =============================================================================
+# INSTALL: Place at plugins/mdn-core/config.yml on every Paper server.
+# TIP: Use Pterodactyl File Manager or SFTP to upload.
 
 database:
+  # ── CHANGE THESE to match your Pterodactyl MySQL server ──
   host: "127.0.0.1"
   port: 3306
   database: "minedrop"
   username: "mdn_user"
   password: "secure_password"
+  # ── Connection pool tuning (leave defaults unless you have 50+ players) ──
   pool-settings:
     maximum-pool-size: 10
     minimum-idle: 2
     connection-timeout-ms: 30000
     idle-timeout-ms: 600000
-    max-lifetime-ms: 1800000
 
 redis:
+  # ── CHANGE THIS to match your Pterodactyl Redis server ──
   host: "127.0.0.1"
   port: 6379
   password: ""
@@ -23,11 +27,10 @@ redis:
   pubsub-channel: "mdn_packet_bus"
 
 network:
+  # ── CHANGE per server! lobby/sam-public/sam-clan/unknown ──
   server-group: "lobby"
   save-interval-seconds: 300
-  session-expiry-seconds: 1200
 
-# ── Commands that can be toggled on/off ──
 commands:
   hub: true
   lobby: true
@@ -39,14 +42,6 @@ commands:
   help: true
   rules: true
 
-# ── Smart routing configuration ──
 routing:
   region-enabled: false
   default-region: "EU"
-  regions:
-    EU:
-      - "lobby-eu-01"
-    NA:
-      - "lobby-na-01"
-    ASIA:
-      - "lobby-asia-01"

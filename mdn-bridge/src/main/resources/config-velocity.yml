@@ -1,15 +1,17 @@
 # =============================================================================
 # MDN-Bridge Velocity Configuration
 # =============================================================================
+# INSTALL: Place at plugins/mdn-bridge/config.yml on Velocity proxy.
+# The secret-api-key MUST match the key in all Paper server configs.
 
 bridge:
   # Unique identifier for this Velocity proxy
   server-identity: "velocity-proxy-01"
 
-  # AES-encrypted API key — must match Paper servers
-  secret-api-key: "ENC(mD9xK1w8P2qR4sT5uW8zY1x3v5b7n9m0)"
+  # ── CHANGE: same shared secret as Paper servers ──
+  secret-api-key: "CHANGE-ME-generate-with-openssl-rand-base64-32"
 
-  # Maximum seconds to wait for Paper handshake confirmation
+  # How long to wait for Paper handshake confirmation
   handshake-timeout-seconds: 10
 
   # Number of retry attempts before declaring failure

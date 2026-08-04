@@ -1,0 +1,145 @@
+[04:12:53] [ServerMain/INFO]: [bootstrap] Running Java 25 (OpenJDK 64-Bit Server VM 25.0.3+9-LTS; Eclipse Adoptium Temurin-25.0.3+9) on Linux 6.8.0-136-generic (amd64)
+[04:12:53] [ServerMain/INFO]: [bootstrap] Loading Paper 26.2-56-main@8cd4f47 (2026-07-09T08:35:16Z) for Minecraft 26.2
+[04:12:54] [ServerMain/INFO]: [PluginInitializerManager] Initializing plugins...
+[04:12:54] [ServerMain/INFO]: [PluginInitializerManager] Initialized 2 plugins
+[04:12:54] [ServerMain/INFO]: [PluginInitializerManager] Bukkit plugins (2):
+ - MDN-Bridge (1.0.0-SNAPSHOT), MDN-Core (1.0.0-SNAPSHOT)
+[04:12:59] [ServerMain/INFO]: Environment: Environment[sessionHost=https://sessionserver.mojang.com, servicesHost=https://api.minecraftservices.com, profilesHost=https://api.mojang.com, name=PROD]
+[04:13:00] [ServerMain/INFO]: Loaded 1585 recipes
+[04:13:00] [ServerMain/INFO]: Loaded 1688 advancements
+[04:13:00] [ServerMain/INFO]: [ca.spottedleaf.dataconverter.minecraft.datatypes.MCTypeRegistry] Initialising converters for DataConverter...
+[04:13:01] [ServerMain/INFO]: [ca.spottedleaf.dataconverter.minecraft.datatypes.MCTypeRegistry] Finished initialising converters for DataConverter in 336.5ms
+[04:13:01] [Server thread/INFO]: Starting minecraft server version 26.2
+[04:13:01] [Server thread/INFO]: Loading properties
+[04:13:01] [Server thread/INFO]: This server is running Paper version 26.2-56-main@8cd4f47 (2026-07-09T08:35:16Z) (Implementing API version 26.2.build.56-alpha)
+[04:13:01] [Server thread/INFO]: [spark] This server bundles the spark profiler. For more information please visit https://docs.papermc.io/paper/profiling
+[04:13:01] [Server thread/INFO]: Server Ping Player Sample Count: 12
+[04:13:01] [Server thread/INFO]: Using 4 threads for Netty based IO
+[04:13:01] [Server thread/INFO]: [MoonriseCommon] Paper is using 3 worker threads, 1 I/O threads
+[04:13:01] [Server thread/INFO]: Default game type: SURVIVAL
+[04:13:01] [Server thread/INFO]: Generating keypair
+[04:13:02] [Server thread/INFO]: Starting Minecraft server on 0.0.0.0:25566
+[04:13:02] [Server thread/INFO]: Paper: Using libdeflate (Linux x86_64) compression from Velocity.
+[04:13:02] [Server thread/INFO]: Paper: Using OpenSSL 3.x.x (Linux x86_64) cipher from Velocity.
+[04:13:02] [Server thread/INFO]: [MDN-Bridge] Loading server plugin MDN-Bridge v1.0.0-SNAPSHOT
+[04:13:02] [Server thread/WARN]: [net.minedrop.bridge.BridgeManager] Plugin 'MDN-Bridge' is missing signature.json
+[04:13:02] [Server thread/ERROR]: [net.minedrop.bridge.BridgeManager] SECURITY: Plugin 'MDN-Bridge' failed signature verification!
+[04:13:02] [Server thread/WARN]: [net.minedrop.bridge.BridgeManager] Plugin 'MDN-Bridge' has been disabled due to failed verification.
+[04:13:02] [Server thread/INFO]: [MDN-Bridge] MDN-Bridge loaded. Server identity: lobby
+[04:13:02] [Server thread/INFO]: [MDN-Core] Loading server plugin MDN-Core v1.0.0-SNAPSHOT
+[04:13:02] [Server thread/INFO]: [MDN-Core] MDN-Core Paper loading...
+[04:13:02] [Server thread/INFO]: Server permissions file permissions.yml is empty, ignoring it
+[04:13:02] [Server thread/WARN]: **** SERVER IS RUNNING IN OFFLINE/INSECURE MODE!
+[04:13:02] [Server thread/WARN]: The server will make no attempt to authenticate usernames. Beware.
+[04:13:02] [Server thread/WARN]: Whilst this makes it possible to use Velocity, unless access to your server is properly restricted, it also opens up the ability for hackers to connect with any username they choose.
+[04:13:02] [Server thread/WARN]: Please see https://docs.papermc.io/velocity/security for further information.
+[04:13:02] [Server thread/WARN]: To change this, set "online-mode" to "true" in the server.properties file.
+[04:13:02] [Server thread/INFO]: Preparing level "world"
+[04:13:02] [Server thread/INFO]: Loading 0 persistent chunks for level 'minecraft:overworld'...
+[04:13:02] [Server thread/INFO]: Preparing spawn area: 100%
+[04:13:02] [Server thread/INFO]: Prepared spawn area in 1 ms
+[04:13:02] [Server thread/INFO]: Loading 0 persistent chunks for level 'minecraft:the_nether'...
+[04:13:02] [Server thread/INFO]: Prepared spawn area in 0 ms
+[04:13:02] [Server thread/INFO]: Loading 0 persistent chunks for level 'minecraft:the_end'...
+[04:13:02] [Server thread/INFO]: Prepared spawn area in 0 ms
+[04:13:02] [Server thread/INFO]: Done preparing level "world" (0.440s)
+[04:13:02] [Server thread/INFO]: [MDN-Bridge] Enabling MDN-Bridge v1.0.0-SNAPSHOT
+[04:13:02] [Server thread/INFO]: [MDN-Bridge] Initiating Velocity handshake (retries: 3)...
+[04:13:02] [Server thread/INFO]: [MDN-Bridge] Handshake attempt 1/3...
+[04:13:02] [Server thread/INFO]: [MDN-Core] Enabling MDN-Core v1.0.0-SNAPSHOT
+[04:13:02] [Server thread/INFO]: [MDN-Core] MDN-API version: 1.0.0
+[04:13:02] [Server thread/INFO]: [MDN-Core] Connecting to MySQL...
+[04:13:02] [Server thread/ERROR]: [MDN-Core] [STDERR] SLF4J(W): No SLF4J providers were found.
+[04:13:02] [Server thread/WARN]: Nag author(s): '[MineDrop Network]' of 'MDN-Core v1.0.0-SNAPSHOT' about their usage of System.out/err.print. Please use your plugin's logger instead (JavaPlugin#getLogger).
+[04:13:02] [Server thread/ERROR]: [MDN-Core] [STDERR] SLF4J(W): Defaulting to no-operation (NOP) logger implementation
+[04:13:02] [Server thread/ERROR]: [MDN-Core] [STDERR] SLF4J(W): See https://www.slf4j.org/codes.html#noProviders for further details.
+[04:13:33] [Server thread/ERROR]: Error occurred while enabling MDN-Core v1.0.0-SNAPSHOT (Is it up to date?)
+net.minedrop.libs.hikari.pool.HikariPool$PoolInitializationException: Failed to initialize pool: Communications link failure
+
+The last packet sent successfully to the server was 0 milliseconds ago. The driver has not received any packets from the server.
+	at mdn-core-1.0.0-SNAPSHOT.jar//net.minedrop.libs.hikari.pool.HikariPool.throwPoolInitializationException(HikariPool.java:584) ~[?:?]
+	at mdn-core-1.0.0-SNAPSHOT.jar//net.minedrop.libs.hikari.pool.HikariPool.checkFailFast(HikariPool.java:571) ~[?:?]
+	at mdn-core-1.0.0-SNAPSHOT.jar//net.minedrop.libs.hikari.pool.HikariPool.<init>(HikariPool.java:98) ~[?:?]
+	at mdn-core-1.0.0-SNAPSHOT.jar//net.minedrop.libs.hikari.HikariDataSource.<init>(HikariDataSource.java:80) ~[?:?]
+	at mdn-core-1.0.0-SNAPSHOT.jar//net.minedrop.core.database.DatabaseManager.<init>(DatabaseManager.java:52) ~[?:?]
+	at mdn-core-1.0.0-SNAPSHOT.jar//net.minedrop.core.paper.CorePaperPlugin.initDatabase(CorePaperPlugin.java:210) ~[?:?]
+	at mdn-core-1.0.0-SNAPSHOT.jar//net.minedrop.core.paper.CorePaperPlugin.onEnable(CorePaperPlugin.java:73) ~[?:?]
+	at org.bukkit.plugin.java.JavaPlugin.setEnabled(JavaPlugin.java:279) ~[paper-api-26.2.build.56-alpha.jar:?]
+	at io.papermc.paper.plugin.manager.PaperPluginInstanceManager.enablePlugin(PaperPluginInstanceManager.java:201) ~[paper-26.2.jar:26.2-56-8cd4f47]
+	at io.papermc.paper.plugin.manager.PaperPluginManagerImpl.enablePlugin(PaperPluginManagerImpl.java:109) ~[paper-26.2.jar:26.2-56-8cd4f47]
+	at org.bukkit.plugin.SimplePluginManager.enablePlugin(SimplePluginManager.java:519) ~[paper-api-26.2.build.56-alpha.jar:?]
+	at org.bukkit.craftbukkit.CraftServer.enablePlugin(CraftServer.java:633) ~[paper-26.2.jar:26.2-56-8cd4f47]
+	at org.bukkit.craftbukkit.CraftServer.enablePlugins(CraftServer.java:590) ~[paper-26.2.jar:26.2-56-8cd4f47]
+	at net.minecraft.server.MinecraftServer.initPostWorld(MinecraftServer.java:648) ~[paper-26.2.jar:26.2-56-8cd4f47]
+	at net.minecraft.server.dedicated.DedicatedServer.initServer(DedicatedServer.java:343) ~[paper-26.2.jar:26.2-56-8cd4f47]
+	at net.minecraft.server.MinecraftServer.runServer(MinecraftServer.java:1267) ~[paper-26.2.jar:26.2-56-8cd4f47]
+	at net.minecraft.server.MinecraftServer.lambda$spin$0(MinecraftServer.java:303) ~[paper-26.2.jar:26.2-56-8cd4f47]
+	at java.base/java.lang.Thread.run(Thread.java:1474) ~[?:?]
+Caused by: com.mysql.cj.jdbc.exceptions.CommunicationsException: Communications link failure
+
+The last packet sent successfully to the server was 0 milliseconds ago. The driver has not received any packets from the server.
+	at com.mysql.cj.jdbc.exceptions.SQLError.createCommunicationsException(SQLError.java:165) ~[mysql-connector-j-9.2.0.jar:9.2.0]
+	at com.mysql.cj.jdbc.exceptions.SQLExceptionsMapping.translateException(SQLExceptionsMapping.java:55) ~[mysql-connector-j-9.2.0.jar:9.2.0]
+	at com.mysql.cj.jdbc.ConnectionImpl.createNewIO(ConnectionImpl.java:837) ~[mysql-connector-j-9.2.0.jar:9.2.0]
+	at com.mysql.cj.jdbc.ConnectionImpl.<init>(ConnectionImpl.java:420) ~[mysql-connector-j-9.2.0.jar:9.2.0]
+	at com.mysql.cj.jdbc.ConnectionImpl.getInstance(ConnectionImpl.java:238) ~[mysql-connector-j-9.2.0.jar:9.2.0]
+	at com.mysql.cj.jdbc.NonRegisteringDriver.connect(NonRegisteringDriver.java:180) ~[mysql-connector-j-9.2.0.jar:9.2.0]
+	at mdn-core-1.0.0-SNAPSHOT.jar//net.minedrop.libs.hikari.util.DriverDataSource.getConnection(DriverDataSource.java:137) ~[?:?]
+	at mdn-core-1.0.0-SNAPSHOT.jar//net.minedrop.libs.hikari.pool.PoolBase.newConnection(PoolBase.java:360) ~[?:?]
+	at mdn-core-1.0.0-SNAPSHOT.jar//net.minedrop.libs.hikari.pool.PoolBase.newPoolEntry(PoolBase.java:202) ~[?:?]
+	at mdn-core-1.0.0-SNAPSHOT.jar//net.minedrop.libs.hikari.pool.HikariPool.createPoolEntry(HikariPool.java:461) ~[?:?]
+	at mdn-core-1.0.0-SNAPSHOT.jar//net.minedrop.libs.hikari.pool.HikariPool.checkFailFast(HikariPool.java:550) ~[?:?]
+	... 16 more
+Caused by: com.mysql.cj.exceptions.CJCommunicationsException: Communications link failure
+
+The last packet sent successfully to the server was 0 milliseconds ago. The driver has not received any packets from the server.
+	at java.base/jdk.internal.reflect.DirectConstructorHandleAccessor.newInstance(DirectConstructorHandleAccessor.java:62) ~[?:?]
+	at java.base/java.lang.reflect.Constructor.newInstanceWithCaller(Constructor.java:499) ~[?:?]
+	at java.base/java.lang.reflect.Constructor.newInstance(Constructor.java:483) ~[?:?]
+	at com.mysql.cj.exceptions.ExceptionFactory.createException(ExceptionFactory.java:52) ~[mysql-connector-j-9.2.0.jar:9.2.0]
+	at com.mysql.cj.exceptions.ExceptionFactory.createException(ExceptionFactory.java:95) ~[mysql-connector-j-9.2.0.jar:9.2.0]
+	at com.mysql.cj.exceptions.ExceptionFactory.createException(ExceptionFactory.java:140) ~[mysql-connector-j-9.2.0.jar:9.2.0]
+	at com.mysql.cj.exceptions.ExceptionFactory.createCommunicationsException(ExceptionFactory.java:156) ~[mysql-connector-j-9.2.0.jar:9.2.0]
+	at com.mysql.cj.protocol.a.NativeSocketConnection.connect(NativeSocketConnection.java:79) ~[mysql-connector-j-9.2.0.jar:9.2.0]
+	at com.mysql.cj.NativeSession.connect(NativeSession.java:142) ~[mysql-connector-j-9.2.0.jar:9.2.0]
+	at com.mysql.cj.jdbc.ConnectionImpl.connectOneTryOnly(ConnectionImpl.java:961) ~[mysql-connector-j-9.2.0.jar:9.2.0]
+	at com.mysql.cj.jdbc.ConnectionImpl.createNewIO(ConnectionImpl.java:825) ~[mysql-connector-j-9.2.0.jar:9.2.0]
+	... 24 more
+Caused by: java.net.SocketTimeoutException: Connect timed out
+	at java.base/sun.nio.ch.NioSocketImpl.timedFinishConnect(NioSocketImpl.java:547) ~[?:?]
+	at java.base/sun.nio.ch.NioSocketImpl.connect(NioSocketImpl.java:594) ~[?:?]
+	at java.base/java.net.SocksSocketImpl.connect(SocksSocketImpl.java:284) ~[?:?]
+	at java.base/java.net.Socket.connect(Socket.java:659) ~[?:?]
+	at com.mysql.cj.protocol.StandardSocketFactory.connect(StandardSocketFactory.java:144) ~[mysql-connector-j-9.2.0.jar:9.2.0]
+	at com.mysql.cj.protocol.a.NativeSocketConnection.connect(NativeSocketConnection.java:53) ~[mysql-connector-j-9.2.0.jar:9.2.0]
+	... 27 more
+[04:13:33] [Server thread/INFO]: [MDN-Core] Disabling MDN-Core v1.0.0-SNAPSHOT
+[04:13:33] [Server thread/INFO]: [MDN-Core] MDN-Core Paper shutting down...
+[04:13:33] [Server thread/INFO]: [MDN-Core] MDN-Core Paper disabled. Goodbye!
+[04:13:34] [Server thread/INFO]: [spark] Starting background profiler...
+[04:13:34] [Server thread/INFO]: Saving chunks for level 'ServerLevel[world]'/minecraft:overworld
+[04:13:34] [Server thread/INFO]: Saving chunks for level 'ServerLevel[world]'/minecraft:the_nether
+[04:13:34] [Server thread/INFO]: Saving chunks for level 'ServerLevel[world]'/minecraft:the_end
+[04:13:34] [Server thread/INFO]: ThreadedAnvilChunkStorage (world): All chunks are saved
+[04:13:34] [Server thread/INFO]: ThreadedAnvilChunkStorage (DIM-1): All chunks are saved
+[04:13:34] [Server thread/INFO]: ThreadedAnvilChunkStorage (DIM1): All chunks are saved
+[04:13:34] [Server thread/INFO]: ThreadedAnvilChunkStorage: All dimensions are saved
+[04:13:34] [Server thread/INFO]: Running delayed init tasks
+[04:13:34] [Server thread/INFO]: Done (40.964s)! For help, type "help"
+[04:13:34] [Craft Scheduler Thread - 4 - MDN-Bridge/WARN]: [MDN-Bridge] Plugin MDN-Bridge v1.0.0-SNAPSHOT generated an exception while executing task 2
+java.lang.NoClassDefFoundError: net/minedrop/api/security/SecurityUtil
+	at mdn-bridge-1.0.0-SNAPSHOT.jar//net.minedrop.bridge.BridgeManager.generateHandshakeChallenge(BridgeManager.java:305) ~[?:?]
+	at mdn-bridge-1.0.0-SNAPSHOT.jar//net.minedrop.bridge.paper.BridgePaperPlugin.lambda$performCrossServerHandshake$6(BridgePaperPlugin.java:154) ~[?:?]
+	at org.bukkit.craftbukkit.scheduler.CraftTask.run(CraftTask.java:78) ~[paper-26.2.jar:26.2-56-8cd4f47]
+	at org.bukkit.craftbukkit.scheduler.CraftAsyncTask.run(CraftAsyncTask.java:57) ~[paper-26.2.jar:26.2-56-8cd4f47]
+	at com.destroystokyo.paper.ServerSchedulerReportingWrapper.run(ServerSchedulerReportingWrapper.java:22) ~[paper-26.2.jar:?]
+	at java.base/java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1090) ~[?:?]
+	at java.base/java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:614) ~[?:?]
+	at java.base/java.lang.Thread.run(Thread.java:1474) ~[?:?]
+Caused by: java.lang.ClassNotFoundException: net.minedrop.api.security.SecurityUtil
+	at org.bukkit.plugin.java.PluginClassLoader.loadClass0(PluginClassLoader.java:208) ~[paper-api-26.2.build.56-alpha.jar:?]
+	at org.bukkit.plugin.java.PluginClassLoader.loadClass(PluginClassLoader.java:175) ~[paper-api-26.2.build.56-alpha.jar:?]
+	at java.base/java.lang.ClassLoader.loadClass(ClassLoader.java:490) ~[?:?]
+	... 8 more
+[04:13:34] [Paper Async Task Handler Thread - 1/INFO]: *** Currently you are 36 builds behind ***
+[04:13:34] [Paper Async Task Handler Thread - 1/INFO]: *** It is highly recommended to download the latest build from https://papermc.io/downloads/paper ***

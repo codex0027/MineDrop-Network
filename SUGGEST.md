@@ -2,7 +2,7 @@
 
 > **Purpose**: Every idea, suggestion, and enhancement — whether implemented, planned, or deferred — is cataloged here.  
 > **For**: Future planning, prioritizing work, and ensuring no good idea gets lost.  
-> **Last Updated**: August 4, 2026
+> **Last Updated**: August 4, 2026 (night — Velocity config bootstrap fix)
 
 ---
 
@@ -10,11 +10,11 @@
 
 | Status | Count |
 |--------|-------|
-| ✅ Implemented | 24 |
+| ✅ Implemented | 25 |
 | 🔜 Planned (Near Future) | 5 |
 | 📋 Future Consideration | 10 |
 | ❌ Rejected / Deferred | 2 |
-| **Total** | **43** |
+| **Total** | **44** |
 
 > **📋 See also**: [ISSUES.md](ISSUES.md) — 36 bugs, gaps, and code smells found during deep audit (Aug 4, 2026)
 
@@ -105,6 +105,7 @@ These suggestions have been fully implemented and are in the codebase.
 | # | Suggestion | Source | Implemented In |
 |---|-----------|--------|---------------|
 | 42 | velocity-plugin.json deduplication — remove manual template, rely on @Plugin annotation processor | Build audit | Deleted both `src/main/resources/velocity-plugin.json` files + removed expand blocks from build.gradle.kts (Phase 7, Steps 85-87) |
+| 43 | Velocity config bootstrap — saveDefaultConfig() for Velocity plugins, copy config-velocity.yml from JAR on first startup | Real server logs | Added `saveDefaultConfig()` to both Velocity plugins (Phase 8, Steps 88-91) |
 
 ---
 
@@ -114,11 +115,11 @@ These are targeted for the next development session.
 
 | # | Suggestion | Priority | Effort | Why It Matters |
 |---|-----------|----------|--------|---------------|
-| 43 | **Rate Limiter** per IP/player on packet publishing | 🔥 High | Medium | Prevents one buggy plugin from DoS-ing the Redis bus |
-| 44 | **Local Event Bus** for in-process pub/sub | 🟡 Medium | Medium | Plugins can fire/listen without going through Redis |
-| 45 | **Graceful Degradation Mode** — switch to local-only when Redis is down | 🔥 High | High | Server stays playable even if Redis crashes |
-| 46 | **Database Migration Framework** — auto-run schema changes | 🟡 Medium | High | No more manual ALTER TABLE; track applied versions |
-| 47 | **Connection Pool Metrics** — expose HikariCP stats in /mdn health | 🟡 Medium | Low | Know pool exhaustion BEFORE server dies |
+| 44 | **Rate Limiter** per IP/player on packet publishing | 🔥 High | Medium | Prevents one buggy plugin from DoS-ing the Redis bus |
+| 45 | **Local Event Bus** for in-process pub/sub | 🟡 Medium | Medium | Plugins can fire/listen without going through Redis |
+| 46 | **Graceful Degradation Mode** — switch to local-only when Redis is down | 🔥 High | High | Server stays playable even if Redis crashes |
+| 47 | **Database Migration Framework** — auto-run schema changes | 🟡 Medium | High | No more manual ALTER TABLE; track applied versions |
+| 48 | **Connection Pool Metrics** — expose HikariCP stats in /mdn health | 🟡 Medium | Low | Know pool exhaustion BEFORE server dies |
 
 ---
 
@@ -128,16 +129,16 @@ Longer-term ideas — good to have but not urgent.
 
 | # | Suggestion | Priority | Effort | Notes |
 |---|-----------|----------|--------|-------|
-| 48 | **Prometheus Metrics Export** — `/metrics` endpoint | 🟢 Low | High | Grafana dashboards for the whole network |
-| 49 | **Developer Debug Kit** — `/mdn debug packets`, `/mdn debug cache` | 🟢 Low | Medium | Live packet tracing, cache peeking, Redis ping |
-| 50 | **Packet Batching** — queue packets and flush every 50ms | 🟡 Medium | Medium | Reduces Redis roundtrips at scale |
-| 51 | **Plugin Hot-Reload Safety** — clean resource cleanup on reload | 🟢 Low | Medium | Prevent thread/connection leaks on /mdn reload |
-| 52 | **Structured Logging** — JSON log format for log aggregation | 🟢 Low | Medium | ELK/Splunk integration |
-| 53 | **Multi-Region Support** — latency-based routing | 🟢 Low | High | For EU/NA/ASIA deployment |
-| 54 | **Redis Sentinel/Cluster Support** — high availability Redis | 🟢 Low | Medium | Production HA setup |
-| 55 | **MySQL Read Replicas** — separate read/write connections | 🟢 Low | Medium | Scale read-heavy operations |
-| 56 | **Webhook Notifications** — configurable webhooks for events | 🟢 Low | Low | Admins get Discord/Slack alerts for key events |
-| 57 | **Admin Dashboard API** — REST endpoints for web admin panel | 🟢 Low | High | Future web-based server management |
+| 49 | **Prometheus Metrics Export** — `/metrics` endpoint | 🟢 Low | High | Grafana dashboards for the whole network |
+| 50 | **Developer Debug Kit** — `/mdn debug packets`, `/mdn debug cache` | 🟢 Low | Medium | Live packet tracing, cache peeking, Redis ping |
+| 51 | **Packet Batching** — queue packets and flush every 50ms | 🟡 Medium | Medium | Reduces Redis roundtrips at scale |
+| 52 | **Plugin Hot-Reload Safety** — clean resource cleanup on reload | 🟢 Low | Medium | Prevent thread/connection leaks on /mdn reload |
+| 53 | **Structured Logging** — JSON log format for log aggregation | 🟢 Low | Medium | ELK/Splunk integration |
+| 54 | **Multi-Region Support** — latency-based routing | 🟢 Low | High | For EU/NA/ASIA deployment |
+| 55 | **Redis Sentinel/Cluster Support** — high availability Redis | 🟢 Low | Medium | Production HA setup |
+| 56 | **MySQL Read Replicas** — separate read/write connections | 🟢 Low | Medium | Scale read-heavy operations |
+| 57 | **Webhook Notifications** — configurable webhooks for events | 🟢 Low | Low | Admins get Discord/Slack alerts for key events |
+| 58 | **Admin Dashboard API** — REST endpoints for web admin panel | 🟢 Low | High | Future web-based server management |
 
 ---
 
@@ -147,8 +148,8 @@ Ideas considered but decided against (with reasons).
 
 | # | Suggestion | Reason |
 |---|-----------|--------|
-| 58 | **Java 25 target** | Paper 1.21.1 ecosystem is built for Java 21; Java 25 is too new and Gradle tooling doesn't fully support it yet |
-| 59 | **Separate repos per plugin** | Would require cross-repo version sync and complex build orchestration. Monorepo keeps everything atomic |
+| 59 | **Java 25 target** | Paper 1.21.1 ecosystem is built for Java 21; Java 25 is too new and Gradle tooling doesn't fully support it yet |
+| 60 | **Separate repos per plugin** | Would require cross-repo version sync and complex build orchestration. Monorepo keeps everything atomic |
 
 ---
 
@@ -170,4 +171,4 @@ Ideas considered but decided against (with reasons).
 
 ---
 
-*Last updated: August 4, 2026 (night) — 42 suggestions cataloged*
+*Last updated: August 4, 2026 (night) — 44 suggestions cataloged*

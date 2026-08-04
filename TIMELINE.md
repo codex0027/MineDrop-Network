@@ -1,7 +1,7 @@
 # MineDrop Network — Development Timeline
 
 > **Purpose**: Visual roadmap of everything we've built, are building, and will build.  
-> **Last Updated**: August 4, 2026 (night)
+> **Last Updated**: August 4, 2026 (night — Velocity config bootstrap fix)
 
 ---
 
@@ -10,13 +10,13 @@
 ```
 2026-08-04 ────────────────────────────────────────────────────────────────► Future
 
-[Phase 0]    [Phase 1]        [Phase 2]         [Phase 3]          [Phase 4]   [Phase 5]    [Phase 6]         [Phase 7]
-Analysis  →  Founda... →  Resilience  →  DLQ+Doc  →  Startup Fix  →  Redis+JAR  →  JSON Dedup
- (30 min)     (3 hours)       (2 hours)      (1.5h)    (1 hour)        (1.5h)        (20 min)
-              ✅ Done     ✅ Done       ✅ Done      ✅ Done         ✅ Done        ✅ Done
+[Phase 0]    [Phase 1]        [Phase 2]         [Phase 3]          [Phase 4]   [Phase 5]    [Phase 6]         [Phase 7]      [Phase 8]
+Analysis  →  Founda... →  Resilience  →  DLQ+Doc  →  Startup Fix  →  Redis+JAR  →  JSON Dedup  →  Config Bootstrap
+ (30 min)     (3 hours)       (2 hours)      (1.5h)    (1 hour)        (1.5h)        (20 min)        (30 min)
+              ✅ Done     ✅ Done       ✅ Done      ✅ Done         ✅ Done        ✅ Done          ✅ Done
 
                                                                               ▼
-                                                                     [Phase 8] ────► [Phase 9]
+                                                                     [Phase 9] ────► [Phase 10]
                                                                       Planned         Dreams
 ```
 
@@ -174,7 +174,25 @@ Status: ✅ Complete Phase 4
 
 ---
 
-## 🔜 Upcoming — Phase 8 (Planned)
+### Phase 8 — Velocity Config Bootstrap Fix
+**Duration**: ~30 minutes  
+**Date**: August 4, 2026 (night)  
+**Commit**: `81da386` (2 files, 89 insertions, 5 deletions)
+
+```
+Critical fix from real server logs:
+  ✅ saveDefaultConfig() for Velocity     (no data dir was ever created)
+  ✅ config-velocity.yml → config.yml     (copied from JAR on first startup)
+  ✅ routing.default-region support       (Velocity config layout was different)
+  ✅ plugins/mdn-*/ folders now created   (mirrors Paper behavior)
+  ✅ Unused imports cleaned               (PluginManager, CommandMeta)
+
+Status: ✅ Config now works on Velocity exactly like Paper
+```
+
+---
+
+## 🔜 Upcoming — Phase 9 (Planned)
 
 **Target**: Next development session  
 **Focus**: Rate Limiting + Graceful Degradation
@@ -192,7 +210,7 @@ Estimated effort: 2-3 hours
 
 ---
 
-## 📋 Phase 9 — Future (Medium Term)
+## 📋 Phase 10 — Future (Medium Term)
 
 **Focus**: Monitoring + Developer Tools
 
@@ -209,7 +227,7 @@ Estimated effort: 4-6 hours
 
 ---
 
-## 🌟 Phase 10 — Dreams (Long Term)
+## 🌟 Phase 11 — Dreams (Long Term)
 
 **Focus**: Scale + High Availability
 
@@ -230,7 +248,7 @@ Estimated effort: 8-12 hours (spread across weeks)
 
 | Metric | Count |
 |--------|-------|
-| Total commits | 6 |
+| Total commits | 7 |
 | Total files created | 94 |
 | Total source lines | ~5,700 |
 | Total test lines | ~400 |

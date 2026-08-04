@@ -2,7 +2,7 @@
 
 > **Purpose**: Every single change — no matter how small — is logged here chronologically.  
 > **For**: New developers onboarding, debugging "why was this done this way", and auditing changes.  
-> **Last Updated**: August 4, 2026 (night — velocity-plugin.json deduplication)
+> **Last Updated**: August 4, 2026 (night — Velocity config bootstrap fix)
 
 ---
 
@@ -434,6 +434,56 @@ race-condition-like ambiguity about which copy Velocity actually reads at runtim
 
 ---
 
+## Phase 8 — Velocity Config Bootstrap Fix (Commit: `81da386`)
+
+### Step 8.1 — "No config.yml found — using defaults" on Velocity
+
+**Root cause**: Velocity doesn't have Paper's `saveDefaultConfig()` API. Both
+`BridgeVelocityPlugin` and `CoreVelocityPlugin` were reading `plugins/mdn-*/config.yml`
+from disk but **never created the data directory or copied default config from the JAR**.
+The file never existed on first startup → always fell through to hardcoded defaults.
+
+**Symptoms on real server**:
+- Logs: `"No config.yml found — using defaults."` every startup
+- No `plugins/mdn-bridge/` or `plugins/mdn-core/` folder created under proxy plugins directory
+- Redis host, port, password, and region always hardcoded defaults — couldn't customize
+
+**Additional bug found**: CoreVelocityPlugin read `network.default-region` from config
+but its Velocity-specific `config-velocity.yml` uses `routing.default-region`. The
+region was never loaded from the Velocity config file.
+
+| # | Change | File | Details |
+|---|--------|------|---------|
+| 88 | Added `saveDefaultConfig()` | `CoreVelocityPlugin.java` | Creates `plugins/mdn-core/`, copies `config-velocity.yml` from JAR → `config.yml`. Loader now reads both `network.default-region` (Paper layout) and `routing.default-region` (Velocity layout). Cleaned unused `CommandMeta` import. |
+| 89 | Added `saveDefaultConfig()` | `BridgeVelocityPlugin.java` | Creates `plugins/mdn-bridge/`, copies `config-velocity.yml` from JAR → `config.yml`. Cleaned unused `PluginManager` import. |
+| 90 | Verified config resources | Both shadow JARs | Bridge: `config-velocity.yml` + `config.yml` both bundled ✅. Core: `config-velocity.yml` + `config.yml` both bundled ✅. Each plugin uses the Velocity-specific config as the default source. |
+| 91 | Config path compatibility | `CoreVelocityPlugin.java` | Added `routing.default-region` parsing alongside `network.default-region`. The Velocity config uses `routing` layout (no database section); Paper config uses `network` layout. Both paths work. |
+
+### Step 8.2 — Config Source Matrix
+
+| Plugin | JAR Resource | Copies To | What's in it |
+|--------|-------------|-----------|-------------|
+| mdn-bridge | `config-velocity.yml` | `plugins/mdn-bridge/config.yml` | Bridge settings: server-identity, secret-api-key, handshake timeout (no DB) |
+| mdn-core | `config-velocity.yml` | `plugins/mdn-core/config.yml` | Redis + routing + command toggles (no MySQL section — Velocity is Redis-only) |
+
+### Step 8.3 — Startup Flow (Now Correct)
+
+```
+Velocity onProxyInitialize()
+  ├─ saveDefaultConfig()  → creates plugins/mdn-*/ + copies config from JAR ✅
+  ├─ loadConfiguration()  → reads from disk ✅ (file now exists!)
+  └─ subsystems init      → uses actual config values ✅
+```
+
+### Step 8.4 — Files Changed
+
+| File | Change |
+|------|--------|
+| `CoreVelocityPlugin.java` | Added `saveDefaultConfig()` method (+32 lines), updated loader for both config layouts, removed unused `CommandMeta` import (−1) |
+| `BridgeVelocityPlugin.java` | Added `saveDefaultConfig()` method (+32 lines), removed unused `PluginManager` import (−1) |
+
+---
+
 ## Summary Statistics
 
 ### By Phase
@@ -447,7 +497,8 @@ race-condition-like ambiguity about which copy Velocity actually reads at runtim
 | Phase 5 (Startup Fixes) | 1 | 1 | 6 | 0 |
 | Phase 6 (Redis + Shadow Fix) | 1 | 0 | 4 | 0 |
 | Phase 7 (Velocity JSON Dedup) | 1 | 0 | 2 | 0 |
-| **Total** | **6** | **94** | **37** | **12** |
+| Phase 8 (Velocity Config Bootstrap) | 1 | 0 | 2 | 0 |
+| **Total** | **7** | **94** | **39** | **12** |
 
 *Phase 2 was bundled with Phase 1 commit
 
@@ -461,7 +512,7 @@ race-condition-like ambiguity about which copy Velocity actually reads at runtim
 | Root docs | DIARY, STEPS, SUGGEST, TIMELINE, README, DEPLOY, FIX-GUIDE, ISSUES | — | — | 8 |
 | **Total** | **49** | **3** | **3** | **63** |
 
-*Note: Two config files (velocity-plugin.json) were removed in Phase 7 — Velocity metadata is now 100% annotation-driven.*
+*Note: Two config files (velocity-plugin.json) were removed in Phase 7 — Velocity metadata is now 100% annotation-driven. Phase 8 connected the existing Velocity config files to the startup bootstrap — plugins now create data dirs and copy defaults on first run.*
 
 ---
 

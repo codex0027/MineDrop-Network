@@ -3,7 +3,7 @@
 > **Purpose**: Every issue, bug, gap, code smell, and improvement opportunity found during deep analysis.  
 > **Status**: ✅ **ALL 36 ISSUES + 1 BUILD ISSUE FIXED** — August 4, 2026  
 > **Last Deep Audit**: August 4, 2026  
-> **Last Fix**: August 4, 2026 (night) — velocity-plugin.json deduplication
+> **Last Fix**: August 4, 2026 (night) — Velocity config bootstrap fix
 > **Files Audited**: 30 source files across mdn-api, mdn-bridge, mdn-core
 
 ---
@@ -16,13 +16,14 @@
 | 🟠 High | 12 | 12 ✅ | 0 |
 | 🟡 Medium | 14 | 14 ✅ | 0 |
 | 🟢 Low | 7 | 7 ✅ | 0 |
-| **Total** | **37** | **37** | **0** |
+| **Total** | **38** | **38** | **0** |
 
-### Additional Build Issue (Post-Audit)
+### Additional Build Issues (Post-Audit)
 
 | ID | Severity | Issue | Fix |
 |----|----------|-------|-----|
-| B-1 | 🟠 | Shadow JAR contains TWO copies of velocity-plugin.json | Deleted manual templates in `src/main/resources/`; Velocity @Plugin annotation processor is now sole source of truth. Removed `filesMatching("velocity-plugin.json")` expand blocks from both build.gradle.kts.
+| B-1 | 🟠 | Shadow JAR contains TWO copies of velocity-plugin.json | Deleted manual templates in `src/main/resources/`; Velocity @Plugin annotation processor is now sole source of truth. Removed `filesMatching("velocity-plugin.json")` expand blocks from both build.gradle.kts. |
+| B-2 | 🟠 | Velocity plugins never create data dirs or copy default config | Added `saveDefaultConfig()` to both `BridgeVelocityPlugin` and `CoreVelocityPlugin` — creates `plugins/mdn-*/`, copies `config-velocity.yml` from JAR → `config.yml`. Core loader now reads `routing.default-region` alongside `network.default-region`. |
 
 ### Resolution Table
 
@@ -44,6 +45,7 @@
 | H-11 | 🟠 | Health scoring missing staleness | Added staleness + latency to isHealthy() and healthScore |
 | H-12 | 🟠 | Signature file sync read | Acceptable (< 1KB) — noted for completeness |
 | B-1 | 🟠 | Duplicate velocity-plugin.json in shadow JAR | Deleted manual templates — annotation processor now sole source |
+| B-2 | 🟠 | Velocity config never created on first startup | Added saveDefaultConfig() to both Velocity plugins |
 | M-1 | 🟡 | Missing @JsonIgnoreProperties | Added to MDNPacket base class (cascades to subclasses) |
 | M-2 | 🟡 | MessageDigest reinstantiation | Added ThreadLocal<MessageDigest> caching |
 | M-3 | 🟡 | Missing migration table | Added mdn_schema_migrations table |
@@ -92,9 +94,11 @@ mdn-core/src/main/java/net/minedrop/core/sync/InventorySyncManager.java (H-10)
 mdn-core/src/main/java/net/minedrop/core/registry/ServerRegistry.java (H-11)
 mdn-bridge/build.gradle.kts                                (B-1)
 mdn-core/build.gradle.kts                                  (B-1)
+mdn-core/src/main/java/net/minedrop/core/velocity/CoreVelocityPlugin.java (B-2)
+mdn-bridge/src/main/java/net/minedrop/bridge/velocity/BridgeVelocityPlugin.java (B-2)
 ```
 
 ---
 
-*Audit completed August 4, 2026. 30 files analyzed. 36 issues found. 36 issues fixed.*  
+*Audit completed August 4, 2026. 30 files analyzed. 36 issues found + 2 build issues. 38 fixed.*  
 *Build: ✅ All 3 plugins compile + test — zero failures.*

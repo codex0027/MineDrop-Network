@@ -7,6 +7,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Predicate;
 
 /**
  * Circuit breaker pattern — prevents cascading failures when an external
@@ -32,6 +33,7 @@ public final class CircuitBreaker {
     private final String name;
     private final int failureThreshold;
     private final Duration cooldownDuration;
+    private final Predicate<Exception> isRetryable;
 
     private final AtomicInteger failureCount = new AtomicInteger(0);
     private final AtomicReference<Instant> openedAt = new AtomicReference<>(null);
@@ -44,9 +46,21 @@ public final class CircuitBreaker {
      * @param cooldownDuration how long to wait before attempting recovery
      */
     public CircuitBreaker(String name, int failureThreshold, Duration cooldownDuration) {
+        this(name, failureThreshold, cooldownDuration, e -> true);
+    }
+
+    /**
+     * @param name             human-readable name for logging
+     * @param failureThreshold consecutive failures before opening the circuit
+     * @param cooldownDuration how long to wait before attempting recovery
+     * @param isRetryable      predicate: return false for permanent errors (fixes M-6)
+     */
+    public CircuitBreaker(String name, int failureThreshold, Duration cooldownDuration,
+                          Predicate<Exception> isRetryable) {
         this.name = name;
         this.failureThreshold = failureThreshold;
         this.cooldownDuration = cooldownDuration;
+        this.isRetryable = isRetryable;
     }
 
     /**
@@ -100,6 +114,12 @@ public final class CircuitBreaker {
     }
 
     private void onFailure(Exception e) {
+        // If the error is non-retryable (permanent), don't count it — just log it
+        if (!isRetryable.test(e)) {
+            log.error("[{}] Non-retryable failure — not counting toward threshold: {}",
+                    name, e.getMessage());
+            return;
+        }
         int failures = failureCount.incrementAndGet();
         log.warn("[{}] Failure {}/{}: {}", name, failures, failureThreshold, e.getMessage());
 

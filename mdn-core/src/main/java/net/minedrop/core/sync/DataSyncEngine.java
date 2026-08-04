@@ -77,9 +77,9 @@ public final class DataSyncEngine {
     /**
      * Saves player profile data to MySQL asynchronously.
      */
-    public CompletableFuture<Void> savePlayerProfile(UUID uuid, String username, String ipAddress) {
+    public CompletableFuture<Boolean> savePlayerProfile(UUID uuid, String username, String ipAddress) {
         pendingSaves.put(uuid, new PendingSave(uuid, username, ipAddress));
-        return CompletableFuture.runAsync(() -> {
+        return CompletableFuture.supplyAsync(() -> {
             String sql = """
                     INSERT INTO mdn_player_profiles (uuid, username, ip_address, last_join)
                     VALUES (?, ?, ?, NOW())
@@ -95,9 +95,11 @@ public final class DataSyncEngine {
                 ps.setString(3, ipAddress);
                 ps.executeUpdate();
                 pendingSaves.remove(uuid);
+                return true;
             } catch (SQLException e) {
                 log.error("Failed to save player profile for {}", uuid, e);
                 dumpToCrashBuffer(uuid, username, ipAddress);
+                return false;
             }
         });
     }

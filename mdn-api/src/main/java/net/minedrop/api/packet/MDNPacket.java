@@ -1,5 +1,6 @@
 package net.minedrop.api.packet;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonSubTypes;
 import com.fasterxml.jackson.annotation.JsonTypeInfo;
 import com.fasterxml.jackson.core.JsonProcessingException;
@@ -16,6 +17,7 @@ import java.util.UUID;
  * Subclasses define specific payload fields. All packets are serialized to JSON
  * and broadcast on the {@code mdn_packet_bus} Redis channel.
  */
+@JsonIgnoreProperties(ignoreUnknown = true)
 @JsonTypeInfo(use = JsonTypeInfo.Id.NAME, property = "packetType")
 @JsonSubTypes({
         @JsonSubTypes.Type(value = AuthUpdatePacket.class, name = "AUTH_UPDATE"),

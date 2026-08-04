@@ -32,4 +32,9 @@ public final class PlayerAlertPacket extends MDNPacket {
     public UUID getUuid() { return uuid; }
     public String getMessage() { return message; }
     public AlertType getType() { return type; }
+
+    @Override
+    public String toString() {
+        return "PlayerAlertPacket{uuid=" + uuid + ", type=" + type + ", message='" + message + "'}";
+    }
 }

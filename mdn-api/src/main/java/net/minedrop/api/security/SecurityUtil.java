@@ -18,12 +18,23 @@ public final class SecurityUtil {
         throw new UnsupportedOperationException("Utility class — do not instantiate");
     }
 
+    /** ThreadLocal MessageDigest to avoid reinstantiation on every call (fixes M-2). */
+    private static final ThreadLocal<MessageDigest> SHA256_DIGEST =
+            ThreadLocal.withInitial(() -> {
+                try {
+                    return MessageDigest.getInstance("SHA-256");
+                } catch (Exception e) {
+                    throw new RuntimeException("SHA-256 not available", e);
+                }
+            });
+
     /**
      * Computes the SHA-256 hex hash of an input string.
      */
     public static String sha256Hex(String input) {
         try {
-            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            MessageDigest digest = SHA256_DIGEST.get();
+            digest.reset();
             byte[] hash = digest.digest(input.getBytes(StandardCharsets.UTF_8));
             StringBuilder hex = new StringBuilder();
             for (byte b : hash) {

@@ -8,16 +8,19 @@ import com.velocitypowered.api.plugin.PluginManager;
 import com.velocitypowered.api.proxy.ProxyServer;
 import net.minedrop.bridge.BridgeManager;
 import org.slf4j.Logger;
+import org.yaml.snakeyaml.Yaml;
 
-import java.io.File;
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Map;
 
 /**
  * Velocity-side entry point for MDN-Bridge.
  * <p>
- * Reads config, listens for Paper server handshake challenges via Redis,
+ * Reads config via SnakeYAML (proper YAML parsing, not naive string splitting),
+ * listens for Paper server handshake challenges via Redis,
  * responds with HMAC signatures, and disables unverified plugins.
  */
 @Plugin(
@@ -66,9 +69,11 @@ public final class BridgeVelocityPlugin {
     }
 
     /**
-     * Loads bridge configuration from the Velocity plugin data directory.
-     * Falls back to reasonable defaults if config is missing.
+     * Loads bridge configuration from the Velocity plugin data directory
+     * using proper SnakeYAML parsing (fixes H-2 — naive string splitting).
+     * Falls back to reasonable defaults if config is missing or malformed.
      */
+    @SuppressWarnings("unchecked")
     private void loadConfiguration() {
         Path configDir = Path.of("plugins", "mdn-bridge");
         Path configFile = configDir.resolve("config.yml");
@@ -80,23 +85,44 @@ public final class BridgeVelocityPlugin {
             return;
         }
 
-        try {
-            // Simple YAML-like parsing for the Velocity side
-            // In production, use a proper YAML library or Velocity's config adapter
-            String content = Files.readString(configFile);
-            for (String line : content.split("\n")) {
-                line = line.trim();
-                if (line.startsWith("server-identity:")) {
-                    bridgeManager.setServerIdentity(
-                            line.substring("server-identity:".length()).trim().replace("\"", ""));
-                } else if (line.startsWith("secret-api-key:")) {
-                    bridgeManager.setSecretApiKey(
-                            line.substring("secret-api-key:".length()).trim().replace("\"", ""));
+        Yaml yaml = new Yaml();
+        try (InputStream is = Files.newInputStream(configFile)) {
+            Map<String, Object> root = yaml.load(is);
+            if (root == null) {
+                logger.warn("Empty config.yml — using defaults.");
+                bridgeManager.setServerIdentity("velocity-proxy");
+                return;
+            }
+
+            // Parse bridge section
+            Map<String, Object> bridge = (Map<String, Object>) root.get("bridge");
+            if (bridge != null) {
+                if (bridge.containsKey("server-identity")) {
+                    bridgeManager.setServerIdentity(String.valueOf(bridge.get("server-identity")));
+                }
+                if (bridge.containsKey("secret-api-key")) {
+                    bridgeManager.setSecretApiKey(String.valueOf(bridge.get("secret-api-key")));
+                }
+                if (bridge.containsKey("handshake-timeout-seconds")) {
+                    bridgeManager.setHandshakeTimeoutSeconds(
+                            parseInt(bridge.get("handshake-timeout-seconds"), 10));
                 }
             }
+
             logger.info("Loaded MDN-Bridge Velocity config.");
         } catch (IOException e) {
             logger.error("Failed to read MDN-Bridge config", e);
+        } catch (ClassCastException e) {
+            logger.error("Malformed config.yml — expected map structure", e);
+        }
+    }
+
+    private static int parseInt(Object value, int fallback) {
+        if (value instanceof Number n) return n.intValue();
+        try {
+            return Integer.parseInt(String.valueOf(value));
+        } catch (NumberFormatException e) {
+            return fallback;
         }
     }
 

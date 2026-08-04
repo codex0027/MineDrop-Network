@@ -26,4 +26,9 @@ public final class EconomySyncPacket extends MDNPacket {
 
     public UUID getUuid() { return uuid; }
     public double getNewBalance() { return newBalance; }
+
+    @Override
+    public String toString() {
+        return "EconomySyncPacket{uuid=" + uuid + ", newBalance=" + newBalance + "}";
+    }
 }

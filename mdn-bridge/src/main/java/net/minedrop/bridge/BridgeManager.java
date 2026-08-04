@@ -9,10 +9,15 @@ import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.MessageDigest;
+import java.time.Duration;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Consumer;
@@ -117,15 +122,12 @@ public final class BridgeManager {
     // ── Plugin Registration ──
 
     /**
-     * Registers a plugin with MDN-Bridge for signature verification.
+     * Registers a plugin and checks its required API version compatibility.
      * Called by every MDN plugin during onLoad().
      *
      * @param pluginId    the plugin's unique name (e.g. "MDN-Core")
      * @param pluginClass the plugin's main class (used to locate its JAR)
      * @return true if the plugin passed verification
-     */
-    /**
-     * Registers a plugin and checks its required API version against the loaded API.
      */
     public boolean register(String pluginId, Class<?> pluginClass) {
         return register(pluginId, pluginClass, null);
@@ -330,20 +332,38 @@ public final class BridgeManager {
 
     /**
      * Sends an alert to the configured Discord webhook on security events.
+     * Uses Java 11+ HttpClient for actual HTTP POST delivery.
      */
     private void sendDiscordAlert(String title, String message) {
         if (discordWebhook == null || discordWebhook.isEmpty()) return;
 
-        // Fire-and-forget — don't block on webhook delivery
+        // Fire-and-forget on a virtual thread — don't block
         Thread.startVirtualThread(() -> {
             try {
                 String payload = String.format(
                         "{\"embeds\":[{\"title\":\"%s\",\"description\":\"%s\",\"color\":16711680}]}",
                         title.replace("\"", "\\\""), message.replace("\"", "\\\""));
-                // In production, use java.net.http.HttpClient to POST to webhook
-                log.info("Discord alert sent: {} — {}", title, message);
+
+                HttpClient client = HttpClient.newBuilder()
+                        .connectTimeout(Duration.ofSeconds(10))
+                        .build();
+                HttpRequest request = HttpRequest.newBuilder(URI.create(discordWebhook))
+                        .header("Content-Type", "application/json")
+                        .POST(HttpRequest.BodyPublishers.ofString(payload))
+                        .timeout(Duration.ofSeconds(15))
+                        .build();
+
+                HttpResponse<String> response = client.send(request,
+                        HttpResponse.BodyHandlers.ofString());
+
+                if (response.statusCode() >= 200 && response.statusCode() < 300) {
+                    log.info("Discord alert delivered: {}", title);
+                } else {
+                    log.warn("Discord webhook returned HTTP {}: {}",
+                            response.statusCode(), response.body());
+                }
             } catch (Exception e) {
-                log.error("Failed to send Discord alert", e);
+                log.error("Failed to send Discord alert: {}", title, e);
             }
         });
     }

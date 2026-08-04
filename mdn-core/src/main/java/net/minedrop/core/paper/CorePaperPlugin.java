@@ -102,14 +102,14 @@ public final class CorePaperPlugin extends JavaPlugin implements Listener {
         dataSyncEngine = new DataSyncEngine(redisManager, inventorySyncManager);
         packetDispatcher = new PacketDispatcher();
 
-        // ── Step 8: Start periodic tasks ──
+        // ── Step 9: Start periodic tasks ──
         startPeriodicSave();
         startHeartbeat();
 
-        // ── Step 9: Register events ──
+        // ── Step 10: Register events ──
         getServer().getPluginManager().registerEvents(this, this);
 
-        // ── Step 10: Subscribe to Redis packet bus ──
+        // ── Step 11: Subscribe to Redis packet bus ──
         redisManager.subscribe("mdn_packet_bus", packetDispatcher::dispatch);
 
         getLogger().info("MDN-Core Paper enabled. All systems ready.");
@@ -232,6 +232,7 @@ public final class CorePaperPlugin extends JavaPlugin implements Listener {
 
     private void startHeartbeat() {
         heartbeatTaskId = getServer().getScheduler().runTaskTimerAsynchronously(this, () -> {
+            if (!MDNAPI.isInitialized()) return;
             var packet = new net.minedrop.api.packet.ServerHeartbeatPacket(
                     getConfig().getString("network.server-group", "paper-server"),
                     getServer().getTPS()[0],

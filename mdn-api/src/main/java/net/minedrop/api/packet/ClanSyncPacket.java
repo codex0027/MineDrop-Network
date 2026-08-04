@@ -32,4 +32,9 @@ public final class ClanSyncPacket extends MDNPacket {
     public UUID getClanId() { return clanId; }
     public ClanAction getAction() { return action; }
     public UUID getPlayer() { return player; }
+
+    @Override
+    public String toString() {
+        return "ClanSyncPacket{clanId=" + clanId + ", action=" + action + ", player=" + player + "}";
+    }
 }

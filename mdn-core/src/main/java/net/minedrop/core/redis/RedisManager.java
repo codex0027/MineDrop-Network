@@ -133,29 +133,40 @@ public final class RedisManager {
 
     /**
      * Pushes a value to the head of a Redis list.
+     * Returns false if Redis is unavailable (fixes M-12).
      */
-    public void lpush(String key, String value) {
+    public boolean lpush(String key, String value) {
         try (Jedis jedis = jedisPool.getResource()) {
             jedis.lpush(key, value);
+            return true;
+        } catch (Exception e) {
+            log.warn("Redis lpush failed for key '{}': {}", key, e.getMessage());
+            return false;
         }
     }
 
     /**
      * Pops a value from the tail of a Redis list (blocking, immediate).
-     * Returns null if the list is empty.
+     * Returns null if the list is empty or Redis is unavailable.
      */
     public String rpop(String key) {
         try (Jedis jedis = jedisPool.getResource()) {
             return jedis.rpop(key);
+        } catch (Exception e) {
+            log.warn("Redis rpop failed for key '{}': {}", key, e.getMessage());
+            return null;
         }
     }
 
     /**
-     * Returns the length of a Redis list.
+     * Returns the length of a Redis list. Returns 0 on error.
      */
     public long llen(String key) {
         try (Jedis jedis = jedisPool.getResource()) {
             return jedis.llen(key);
+        } catch (Exception e) {
+            log.warn("Redis llen failed for key '{}': {}", key, e.getMessage());
+            return 0;
         }
     }
 
@@ -230,8 +241,19 @@ public final class RedisManager {
         }
         activeSubscriptions.clear();
 
-        // Shut down subscriber threads
-        subscriberThreads.shutdownNow();
+        // Shut down subscriber threads gracefully (fixes H-8)
+        subscriberThreads.shutdown();
+        try {
+            if (!subscriberThreads.awaitTermination(5, TimeUnit.SECONDS)) {
+                subscriberThreads.shutdownNow();
+                if (!subscriberThreads.awaitTermination(2, TimeUnit.SECONDS)) {
+                    log.warn("Subscriber threads did not terminate in time");
+                }
+            }
+        } catch (InterruptedException e) {
+            subscriberThreads.shutdownNow();
+            Thread.currentThread().interrupt();
+        }
 
         // Close pool
         if (jedisPool != null && !jedisPool.isClosed()) {

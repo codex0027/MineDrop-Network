@@ -26,17 +26,20 @@ import net.minedrop.core.redis.RedisManager;
 import net.minedrop.core.registry.ServerRegistry;
 import net.minedrop.core.session.SessionManager;
 import org.slf4j.Logger;
+import org.yaml.snakeyaml.Yaml;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Map;
 import java.util.Optional;
 
 /**
  * Velocity-side entry point for MDN-Core.
  * <p>
  * Manages server registry, player sessions, smart routing, and proxy-level commands.
- * Reads configuration from plugins/mdn-core/config.yml.
+ * Reads configuration from plugins/mdn-core/config.yml using proper SnakeYAML parsing.
  */
 @Plugin(
         id = "mdn-core",
@@ -130,7 +133,12 @@ public final class CoreVelocityPlugin {
     @Subscribe
     public void onPlayerLogin(LoginEvent event) {
         var player = event.getPlayer();
-        sessionManager.createSession(player.getUniqueId(), player.getUsername(), "lobby");
+        // Derive server from where the player is connecting, not hardcoded "lobby"
+        // If no previous server is available, leave as null; ServerConnectedEvent will update it
+        String currentServer = player.getCurrentServer()
+                .map(s -> s.getServerInfo().getName())
+                .orElse(null);
+        sessionManager.createSession(player.getUniqueId(), player.getUsername(), currentServer);
     }
 
     @Subscribe
@@ -147,35 +155,50 @@ public final class CoreVelocityPlugin {
         );
     }
 
-    // ── Configuration loading ──
+    // ── Configuration loading (SnakeYAML) ──
 
+    @SuppressWarnings("unchecked")
     private void loadConfiguration() {
         Path configFile = Path.of("plugins", "mdn-core", "config.yml");
         if (!Files.exists(configFile)) {
             logger.warn("No config.yml found — using defaults.");
             return;
         }
-        try {
-            for (String line : Files.readAllLines(configFile)) {
-                line = line.trim();
-                if (line.startsWith("host:")) {
-                    redisHost = extractValue(line);
-                } else if (line.startsWith("port:")) {
-                    try { redisPort = Integer.parseInt(extractValue(line)); } catch (NumberFormatException ignored) {}
-                } else if (line.startsWith("password:")) {
-                    redisPassword = extractValue(line);
-                } else if (line.startsWith("default-region:")) {
-                    defaultRegion = extractValue(line);
-                }
+
+        Yaml yaml = new Yaml();
+        try (InputStream is = Files.newInputStream(configFile)) {
+            Map<String, Object> root = yaml.load(is);
+            if (root == null) return;
+
+            // Parse nested Redis config
+            Map<String, Object> redis = (Map<String, Object>) root.get("redis");
+            if (redis != null) {
+                redisHost = String.valueOf(redis.getOrDefault("host", redisHost));
+                redisPort = parseInt(redis.get("port"), redisPort);
+                redisPassword = String.valueOf(redis.getOrDefault("password", redisPassword));
             }
+
+            // Parse network config
+            Map<String, Object> network = (Map<String, Object>) root.get("network");
+            if (network != null) {
+                defaultRegion = String.valueOf(network.getOrDefault("default-region", defaultRegion));
+            }
+
             logger.info("Config loaded: redis={}:{}, region={}", redisHost, redisPort, defaultRegion);
         } catch (IOException e) {
             logger.error("Failed to read config", e);
+        } catch (ClassCastException e) {
+            logger.error("Malformed config.yml — expected map structure", e);
         }
     }
 
-    private static String extractValue(String line) {
-        return line.substring(line.indexOf(':') + 1).trim().replace("\"", "").replace("'", "");
+    private static int parseInt(Object value, int fallback) {
+        if (value instanceof Number n) return n.intValue();
+        try {
+            return Integer.parseInt(String.valueOf(value));
+        } catch (NumberFormatException e) {
+            return fallback;
+        }
     }
 
     // ── Commands ──
@@ -198,10 +221,10 @@ public final class CoreVelocityPlugin {
         register(cmd, "mdn", new MdnCommand());
 
         // Standard informational commands
-        register(cmd, "website", msg("§bWebsite: §fhttps://minedrop.net"));
-        register(cmd, "store", msg("§6Store: §fhttps://store.minedrop.net"));
-        register(cmd, "vote", msg("§aVote: §fhttps://minedrop.net/vote"));
-        register(cmd, "discord", msg("§9Discord: §fhttps://discord.gg/minedrop"));
+        register(cmd, "website", msg("Website: https://minedrop.net"));
+        register(cmd, "store", msg("Store: https://store.minedrop.net"));
+        register(cmd, "vote", msg("Vote: https://minedrop.net/vote"));
+        register(cmd, "discord", msg("Discord: https://discord.gg/minedrop"));
         register(cmd, "help", (SimpleCommand) invocation -> {
             invocation.source().sendMessage(Component.text("MineDrop Network Help", NamedTextColor.YELLOW, TextDecoration.BOLD));
             invocation.source().sendMessage(Component.text("/mdn servers — View all registered servers", NamedTextColor.GRAY));
@@ -209,7 +232,7 @@ public final class CoreVelocityPlugin {
             invocation.source().sendMessage(Component.text("/website — Server website", NamedTextColor.GRAY));
             invocation.source().sendMessage(Component.text("/discord — Join our Discord", NamedTextColor.GRAY));
         });
-        register(cmd, "rules", msg("§c§lRules: §7No cheating, be respectful, no inappropriate content."));
+        register(cmd, "rules", msg("Rules: No cheating, be respectful, no inappropriate content."));
         register(cmd, "spawn", (SimpleCommand) invocation -> {
             if (invocation.source() instanceof Player player) routeToLobby(player);
         });
@@ -271,11 +294,16 @@ public final class CoreVelocityPlugin {
                     invocation.source().sendMessage(Component.text(
                             "Registered Servers (" + servers.size() + "):", NamedTextColor.GREEN));
                     for (var s : servers) {
-                        String health = s.isHealthy() ? "§a✓" : "§c⚠";
-                        invocation.source().sendMessage(Component.text(String.format(
-                                " %s §7%s §f%d/%d §7TPS:%.1f §7%s",
-                                health, s.getName(), s.getPlayerCount(),
-                                s.getMaxPlayers(), s.getTps(), s.getServerGroup())));
+                        NamedTextColor healthColor = s.isHealthy()
+                                ? NamedTextColor.GREEN : NamedTextColor.RED;
+                        String healthIcon = s.isHealthy() ? "✓ " : "⚠ ";
+                        invocation.source().sendMessage(Component.text()
+                                .append(Component.text(healthIcon, healthColor))
+                                .append(Component.text(s.getName() + " ", NamedTextColor.GRAY))
+                                .append(Component.text(s.getPlayerCount() + "/" + s.getMaxPlayers(), NamedTextColor.WHITE))
+                                .append(Component.text(" TPS:" + String.format("%.1f", s.getTps()), NamedTextColor.GRAY))
+                                .append(Component.text(" " + s.getServerGroup(), NamedTextColor.GRAY))
+                                .build());
                     }
                 }
                 case "health" -> {
@@ -283,7 +311,13 @@ public final class CoreVelocityPlugin {
                     invocation.source().sendMessage(Component.text("  Servers: " + serverRegistry.getOnlineServerCount(), NamedTextColor.GRAY));
                     invocation.source().sendMessage(Component.text("  Online players (proxy): " + proxy.getPlayerCount(), NamedTextColor.GRAY));
                     invocation.source().sendMessage(Component.text("  Active sessions: " + sessionManager.getOnlineCount(), NamedTextColor.GRAY));
-                    invocation.source().sendMessage(Component.text("  Redis: " + (redisManager.isConnected() ? "§aconnected" : "§cDISCONNECTED"), NamedTextColor.GRAY));
+                    NamedTextColor redisColor = redisManager.isConnected()
+                            ? NamedTextColor.GREEN : NamedTextColor.RED;
+                    String redisStatus = redisManager.isConnected() ? "connected" : "DISCONNECTED";
+                    invocation.source().sendMessage(Component.text()
+                            .append(Component.text("  Redis: ", NamedTextColor.GRAY))
+                            .append(Component.text(redisStatus, redisColor))
+                            .build());
                 }
                 case "reload" -> invocation.source().sendMessage(Component.text("Config reloaded.", NamedTextColor.GREEN));
                 default -> invocation.source().sendMessage(Component.text(

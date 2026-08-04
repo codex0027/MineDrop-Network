@@ -10,23 +10,44 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Tracks online player sessions, handles reconnects and server transfers.
  * <p>
  * Runs primarily on Velocity. Paper servers query session state through Redis.
+ * Stale sessions (players who disconnected without a clean event) are
+ * automatically cleaned up every 5 minutes (fixes M-9).
  */
 public final class SessionManager {
 
     private static final Logger log = LoggerFactory.getLogger(SessionManager.class);
 
+    /** Max time a session can be "stale" (no activity) before cleanup. */
+    private static final long SESSION_STALE_MS = 60_000; // 1 minute
+    /** Max time a transfer can stay pending before timeout. */
+    private static final long TRANSFER_TIMEOUT_MS = 30_000; // 30 seconds
+
     private final RedisManager redisManager;
     private final PlayerCache playerCache;
     private final Map<UUID, PlayerSession> activeSessions = new ConcurrentHashMap<>();
 
+    private final ScheduledExecutorService cleanupScheduler
+            = Executors.newSingleThreadScheduledExecutor(r -> {
+        Thread t = new Thread(r, "mdn-session-cleanup");
+        t.setDaemon(true);
+        return t;
+    });
+
     public SessionManager(RedisManager redisManager, PlayerCache playerCache) {
         this.redisManager = redisManager;
         this.playerCache = playerCache;
+
+        // Periodic cleanup of stale sessions (fixes M-9)
+        cleanupScheduler.scheduleAtFixedRate(this::cleanupStaleSessions,
+                5, 5, TimeUnit.MINUTES);
     }
 
     /**
@@ -39,10 +60,10 @@ public final class SessionManager {
         // Update player cache
         var cached = playerCache.getPlayer(uuid);
         cached.setUsername(username);
-        cached.setCurrentServer(serverName);
+        if (serverName != null) cached.setCurrentServer(serverName);
         playerCache.updatePlayer(uuid, cached);
 
-        log.info("Session created: {} on {}", username, serverName);
+        log.info("Session created: {} on {}", username, serverName != null ? serverName : "unknown");
         return session;
     }
 
@@ -54,6 +75,7 @@ public final class SessionManager {
         if (session != null) {
             session.setCurrentServer(targetServer);
             session.setLastTransferTime(System.currentTimeMillis());
+            session.setTransferring(false);
 
             var cached = playerCache.getPlayer(uuid);
             cached.setCurrentServer(targetServer);
@@ -71,6 +93,45 @@ public final class SessionManager {
         if (session != null) {
             playerCache.invalidate(uuid);
             log.info("Session ended: {} (was on {})", session.getUsername(), session.getCurrentServer());
+        }
+    }
+
+    /**
+     * Cleans up stale sessions — players who disconnected without a clean
+     * disconnect event (crash, timeout, network loss). Fixes M-9.
+     */
+    private void cleanupStaleSessions() {
+        long now = System.currentTimeMillis();
+        int removed = 0;
+
+        var it = activeSessions.entrySet().iterator();
+        while (it.hasNext()) {
+            var entry = it.next();
+            PlayerSession session = entry.getValue();
+
+            // Remove sessions stuck in transfer for too long
+            if (session.isTransferring()
+                    && (now - session.getLastTransferTime()) > TRANSFER_TIMEOUT_MS) {
+                it.remove();
+                playerCache.invalidate(entry.getKey());
+                log.warn("Stale transfer session removed: {} (transfer timed out)", session.getUsername());
+                removed++;
+                continue;
+            }
+
+            // Remove sessions with no activity in the stale window
+            if ((now - session.getLastTransferTime()) > SESSION_STALE_MS
+                    && (now - session.getLoginTime()) > SESSION_STALE_MS) {
+                it.remove();
+                playerCache.invalidate(entry.getKey());
+                log.warn("Stale session removed: {} (no activity)", session.getUsername());
+                removed++;
+            }
+        }
+
+        if (removed > 0) {
+            log.info("Cleaned up {} stale sessions ({} remaining)",
+                    removed, activeSessions.size());
         }
     }
 

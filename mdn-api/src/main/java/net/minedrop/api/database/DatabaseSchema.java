@@ -16,6 +16,7 @@ public final class DatabaseSchema {
 
     // ── Table Names ──
 
+    public static final String TABLE_SCHEMA_MIGRATIONS = "mdn_schema_migrations";
     public static final String TABLE_PLAYER_PROFILES  = "mdn_player_profiles";
     public static final String TABLE_ECONOMY          = "mdn_economy";
     public static final String TABLE_AUCTION_HOUSE    = "mdn_auction_house";
@@ -110,6 +111,15 @@ public final class DatabaseSchema {
                     total_stolen INT DEFAULT 0,
                     total_collected INT DEFAULT 0,
                     FOREIGN KEY (uuid) REFERENCES mdn_player_profiles(uuid) ON DELETE CASCADE
+                )
+                """,
+
+                // 0. Schema Migrations (must be created first — fixes M-3)
+                """
+                CREATE TABLE IF NOT EXISTS mdn_schema_migrations (
+                    version VARCHAR(32) PRIMARY KEY,
+                    description VARCHAR(255) NOT NULL,
+                    applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
                 """,
 

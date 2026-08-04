@@ -34,4 +34,9 @@ public final class ServerHeartbeatPacket extends MDNPacket {
     public double getTps() { return tps; }
     public int getPlayers() { return players; }
     public int getMaxPlayers() { return maxPlayers; }
+
+    @Override
+    public String toString() {
+        return "ServerHeartbeatPacket{server='" + server + "', tps=" + tps + ", players=" + players + "/" + maxPlayers + "}";
+    }
 }

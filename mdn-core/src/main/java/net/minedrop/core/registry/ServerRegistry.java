@@ -133,7 +133,9 @@ public final class ServerRegistry {
         private int maxPlayers;
         private boolean online;
         private long lastHeartbeat;
+        private long lastLatencyMs = 0;
 
+        /** Use the full constructor — the no-arg one is for deserialization only. */
         public ServerInfo() {}
 
         public ServerInfo(String name, String serverGroup, String region, int maxPlayers) {
@@ -146,21 +148,25 @@ public final class ServerRegistry {
         }
 
         /**
-         * Returns true if TPS is above the playable threshold.
+         * Returns true if TPS is above the playable threshold AND the server
+         * has recent heartbeats (fixes H-11 — now checks staleness).
          */
         public boolean isHealthy() {
-            return tps >= 17.0;
+            boolean tpsOk = tps >= 17.0;
+            boolean notStale = (System.currentTimeMillis() - lastHeartbeat) < 60_000;
+            return tpsOk && notStale;
         }
 
         /**
          * Composite health score for routing decisions.
-         * Lower is better: factors in TPS (inverted) + player load + time since last heartbeat.
+         * Lower is better: factors in TPS (inverted) + player load + latency + staleness.
          */
         public double getHealthScore() {
-            double tpsScore = Math.max(0, 20.0 - tps);       // 0-3 range
-            double loadScore = (double) playerCount / Math.max(1, maxPlayers) * 10; // 0-10 range
-            double stalenessScore = (System.currentTimeMillis() - lastHeartbeat) / 1000.0 * 0.01; // tiny factor
-            return tpsScore + loadScore + stalenessScore;
+            double tpsScore = Math.max(0, 20.0 - tps);
+            double loadScore = (double) playerCount / Math.max(1, maxPlayers) * 10;
+            double stalenessScore = (System.currentTimeMillis() - lastHeartbeat) / 1000.0 * 0.01;
+            double latencyScore = lastLatencyMs / 100.0; // normalized
+            return tpsScore + loadScore + stalenessScore + latencyScore;
         }
 
         // ── Getters & Setters ──
@@ -188,5 +194,8 @@ public final class ServerRegistry {
 
         public long getLastHeartbeat() { return lastHeartbeat; }
         public void setLastHeartbeat(long lastHeartbeat) { this.lastHeartbeat = lastHeartbeat; }
+
+        public long getLastLatencyMs() { return lastLatencyMs; }
+        public void setLastLatencyMs(long lastLatencyMs) { this.lastLatencyMs = lastLatencyMs; }
     }
 }

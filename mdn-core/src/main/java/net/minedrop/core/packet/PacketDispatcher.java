@@ -6,40 +6,50 @@ import org.slf4j.LoggerFactory;
 
 import net.minedrop.core.util.DeadLetterQueue;
 
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.Consumer;
 
 /**
  * Dispatches incoming Redis Pub/Sub messages to registered packet handlers.
  * <p>
- * Other plugins (MDN-Economy, MDN-Social, etc.) register handlers for specific
- * packet types. When a packet arrives on the Redis bus, it's deserialized and
- * routed to all matching handlers.
+ * Supports multiple handlers per packet type (fixes M-13). Other plugins
+ * (MDN-Economy, MDN-Social, etc.) register handlers for specific packet types.
+ * When a packet arrives on the Redis bus, it's deserialized and routed to
+ * all matching handlers.
  */
 public final class PacketDispatcher {
 
     private static final Logger log = LoggerFactory.getLogger(PacketDispatcher.class);
 
-    private final Map<String, Consumer<MDNPacket>> handlers = new ConcurrentHashMap<>();
+    /** Multi-handler: one packet type → many consumers. */
+    private final Map<String, List<Consumer<MDNPacket>>> handlers = new ConcurrentHashMap<>();
     private DeadLetterQueue deadLetterQueue;
 
     /**
      * Registers a handler for a specific packet type.
+     * Multiple handlers can be registered for the same type (fixes M-13).
      *
      * @param packetType the packet type string (e.g. "ECONOMY_SYNC")
      * @param handler    callback invoked when a packet of this type arrives
      */
     public void registerHandler(String packetType, Consumer<MDNPacket> handler) {
-        handlers.put(packetType, handler);
-        log.info("Packet handler registered for type: {}", packetType);
+        handlers.computeIfAbsent(packetType, k -> new CopyOnWriteArrayList<>()).add(handler);
+        log.info("Packet handler registered for type: {} (total: {})",
+                packetType, handlers.get(packetType).size());
     }
 
     /**
-     * Unregisters a handler for a packet type.
+     * Unregisters a specific handler for a packet type.
      */
-    public void unregisterHandler(String packetType) {
-        handlers.remove(packetType);
+    public void unregisterHandler(String packetType, Consumer<MDNPacket> handler) {
+        List<Consumer<MDNPacket>> list = handlers.get(packetType);
+        if (list != null) {
+            list.remove(handler);
+            if (list.isEmpty()) handlers.remove(packetType);
+        }
     }
 
     /**
@@ -51,8 +61,9 @@ public final class PacketDispatcher {
 
     /**
      * Handles an incoming raw JSON message from Redis.
-     * Deserializes it and dispatches to the appropriate handler.
-     * If the handler throws, the packet is enqueued to the Dead Letter Queue.
+     * Deserializes it and dispatches to all matching handlers.
+     * Each handler failure is caught individually — one buggy handler
+     * won't break others (fixes M-13).
      *
      * @param rawJson the raw JSON string from Redis Pub/Sub
      */
@@ -67,8 +78,8 @@ public final class PacketDispatcher {
                 return;
             }
 
-            Consumer<MDNPacket> handler = handlers.get(packetType);
-            if (handler == null) {
+            List<Consumer<MDNPacket>> handlerList = handlers.get(packetType);
+            if (handlerList == null || handlerList.isEmpty()) {
                 log.debug("No handler registered for packet type: {}", packetType);
                 return;
             }
@@ -76,19 +87,20 @@ public final class PacketDispatcher {
             // Full deserialization via MDNPacket's polymorphic mapper
             MDNPacket packet = MDNPacket.deserialize(rawJson);
 
-            // Try to handle — if it throws, push to DLQ
-            try {
-                handler.accept(packet);
-            } catch (Exception handlerError) {
-                log.error("Handler for '{}' threw — enqueuing to DLQ", packetType, handlerError);
-                if (deadLetterQueue != null) {
-                    deadLetterQueue.enqueue(rawJson, handlerError);
+            // Dispatch to all handlers — each in its own try/catch
+            for (Consumer<MDNPacket> handler : handlerList) {
+                try {
+                    handler.accept(packet);
+                } catch (Exception handlerError) {
+                    log.error("Handler for '{}' threw — enqueuing to DLQ", packetType, handlerError);
+                    if (deadLetterQueue != null) {
+                        deadLetterQueue.enqueue(rawJson, handlerError);
+                    }
                 }
             }
 
         } catch (Exception e) {
             log.error("Failed to deserialize packet: {}", truncate(rawJson), e);
-            // If we can't even deserialize, enqueue the raw JSON for manual inspection
             if (deadLetterQueue != null) {
                 deadLetterQueue.enqueue(rawJson, e);
             }

@@ -31,4 +31,9 @@ public final class PlayerSwitchServerPacket extends MDNPacket {
     public UUID getUuid() { return uuid; }
     public String getTarget() { return target; }
     public boolean isForce() { return force; }
+
+    @Override
+    public String toString() {
+        return "PlayerSwitchServerPacket{uuid=" + uuid + ", target='" + target + "', force=" + force + "}";
+    }
 }

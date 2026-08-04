@@ -31,4 +31,9 @@ public final class InventoryLockPacket extends MDNPacket {
     public UUID getUuid() { return uuid; }
     public boolean isLocked() { return locked; }
     public long getTimestamp() { return timestamp; }
+
+    @Override
+    public String toString() {
+        return "InventoryLockPacket{uuid=" + uuid + ", locked=" + locked + "}";
+    }
 }

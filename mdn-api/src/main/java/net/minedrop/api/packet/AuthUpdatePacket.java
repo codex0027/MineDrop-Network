@@ -26,4 +26,9 @@ public final class AuthUpdatePacket extends MDNPacket {
 
     public UUID getUuid() { return uuid; }
     public boolean isStatus() { return status; }
+
+    @Override
+    public String toString() {
+        return "AuthUpdatePacket{uuid=" + uuid + ", status=" + status + "}";
+    }
 }

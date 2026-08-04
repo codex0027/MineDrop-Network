@@ -49,9 +49,17 @@ public final class PlayerCache {
 
     /**
      * Loads a player's cached data, preferring local cache over Redis.
+     * Gracefully handles Redis failures by returning default data (fixes H-5).
      */
     public CachedPlayer getPlayer(UUID uuid) {
-        CacheEntry entry = localCache.computeIfAbsent(uuid, k -> new CacheEntry(loadFromRedis(uuid)));
+        CacheEntry entry = localCache.computeIfAbsent(uuid, k -> {
+            try {
+                return new CacheEntry(loadFromRedis(uuid));
+            } catch (Exception e) {
+                log.warn("Redis unavailable for player cache lookup — using default for {}", uuid);
+                return new CacheEntry(CachedPlayer.createDefault(uuid));
+            }
+        });
         entry.touch();
         return entry.player;
     }
@@ -181,7 +189,7 @@ public final class PlayerCache {
         public int getPrestigeLevel() { return prestigeLevel; }
         public void setPrestigeLevel(int prestigeLevel) { this.prestigeLevel = prestigeLevel; }
 
-        public boolean isHasActiveBoost() { return hasActiveBoost; }
+        public boolean hasActiveBoost() { return hasActiveBoost; }
         public void setHasActiveBoost(boolean hasActiveBoost) { this.hasActiveBoost = hasActiveBoost; }
 
         public boolean isProtectionActive() { return protectionActive; }

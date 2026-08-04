@@ -32,4 +32,9 @@ public final class ModerationActionPacket extends MDNPacket {
     public UUID getTarget() { return target; }
     public ActionType getType() { return type; }
     public long getExpiry() { return expiry; }
+
+    @Override
+    public String toString() {
+        return "ModerationActionPacket{target=" + target + ", type=" + type + ", expiry=" + expiry + "}";
+    }
 }

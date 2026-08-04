@@ -118,7 +118,8 @@ public final class MDNAPI {
         MDNAPI api = new MDNAPI();
         api.dataSource = null;
         api.jedisPool = null;
-        initialized.set(true); // mark as ready so getInstance() won't complain if called later
+        instance = api;
+        initialized.set(true);
         return api;
     }
 

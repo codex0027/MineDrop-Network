@@ -1,5 +1,7 @@
 package net.minedrop.core.sync;
 
+import com.fasterxml.jackson.databind.node.JsonNodeFactory;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import net.minedrop.api.MDNAPI;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -25,6 +27,7 @@ public final class InventorySyncManager {
 
     /**
      * Saves a player's inventory to MySQL asynchronously.
+     * Uses Jackson ObjectMapper to build properly escaped JSON (fixes H-10).
      *
      * @param uuid            player UUID
      * @param inventoryBase64 Base64-encoded inventory data
@@ -33,9 +36,6 @@ public final class InventorySyncManager {
     public CompletableFuture<Void> saveInventory(UUID uuid, String inventoryBase64,
                                                   String enderChestBase64) {
         return CompletableFuture.runAsync(() -> {
-            // Note: enderChest is stored as part of the serialized inventory data.
-            // The inventory_serialized field holds both main inventory + ender chest.
-            // If separate enderChest support is needed, add an ender_chest_serialized column.
             String sql = """
                     INSERT INTO mdn_sam_player_data (uuid, inventory_serialized, unslotted_statues)
                     VALUES (?, ?, '[]')
@@ -45,10 +45,12 @@ public final class InventorySyncManager {
             try (Connection conn = MDNAPI.getInstance().getDataSource().getConnection();
                  PreparedStatement ps = conn.prepareStatement(sql)) {
                 ps.setString(1, uuid.toString());
-                // Store combined inventory + ender chest data
-                String combined = "{\"inv\":\"" + inventoryBase64 + "\",\"ec\":\""
-                        + (enderChestBase64 != null ? enderChestBase64 : "") + "\"}";
-                ps.setString(2, combined);
+                // Build proper JSON via Jackson to avoid corrupt data from string concatenation
+                ObjectNode combined = JsonNodeFactory.instance.objectNode();
+                combined.put("inv", inventoryBase64 != null ? inventoryBase64 : "");
+                combined.put("ec", enderChestBase64 != null ? enderChestBase64 : "");
+                String json = MDNAPI.getInstance().getObjectMapper().writeValueAsString(combined);
+                ps.setString(2, json);
                 ps.executeUpdate();
                 log.debug("Inventory saved for {} (inv: {} bytes, ec: {} bytes)",
                         uuid,
@@ -56,6 +58,8 @@ public final class InventorySyncManager {
                         enderChestBase64 != null ? enderChestBase64.length() : 0);
             } catch (SQLException e) {
                 log.error("Failed to save inventory for {}", uuid, e);
+            } catch (Exception e) {
+                log.error("Failed to serialize inventory JSON for {}", uuid, e);
             }
         });
     }

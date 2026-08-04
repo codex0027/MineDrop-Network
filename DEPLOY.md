@@ -1,8 +1,12 @@
 # 🚀 MineDrop Network — Pterodactyl Deployment Guide
 
 > **Target**: 1 Velocity proxy + 2+ Paper game servers, all managed via Pterodactyl Panel  
-> **Last Updated**: August 4, 2026  
+> **Last Updated**: August 4, 2026 (evening — Redis + Bridge shadow JAR fixes)
 > **Plugin Versions**: mdn-bridge 1.0.0, mdn-core 1.0.0
+>
+> **Two setup paths**:
+> - **VPS-direct** (recommended): MySQL + Redis installed directly on VPS. Fastest.
+> - **Pterodactyl eggs**: MySQL + Redis managed via Pterodactyl eggs. More control.
 
 ---
 
@@ -33,7 +37,48 @@
 
 ---
 
-## 🟢 PHASE 1: Pterodactyl MySQL & Redis Setup
+## ⚡ QUICK START: VPS-Direct Setup (Recommended)
+
+If MySQL and Redis are already installed on your VPS (not via Pterodactyl eggs),
+skip Phase 1 entirely and use this:
+
+### Prerequisites Check
+
+```bash
+mysql --version    # Should show MariaDB 10.x or MySQL 8.x
+redis-cli PING     # Should respond PONG
+ip addr show docker0 | grep "inet "   # Note the IP (usually 172.17.0.1)
+```
+
+### Database Setup (3 commands)
+
+```bash
+sudo mysql
+```
+
+```sql
+CREATE DATABASE IF NOT EXISTS minedrop;
+CREATE USER IF NOT EXISTS 'mdn_user'@'172.%' IDENTIFIED BY 'YourPassword123!';
+GRANT ALL PRIVILEGES ON minedrop.* TO 'mdn_user'@'172.%';
+FLUSH PRIVILEGES;
+```
+
+### Redis Setup (1 command)
+
+```bash
+sudo sed -i 's/^bind .*/bind 0.0.0.0/' /etc/redis/redis.conf && sudo systemctl restart redis-server
+```
+
+### Config IPs
+
+Use `172.17.0.1` (your Docker bridge IP) for `database.host` and `redis.host` in `plugins/mdn-core/config.yml`.
+Pterodactyl containers reach the host VPS through this IP.
+
+Then skip to **Phase 2**.
+
+---
+
+## 🟢 PHASE 1: Pterodactyl MySQL & Redis Setup (Alternative)
 
 ### Step 1: Add the MySQL (MariaDB) Egg
 
@@ -362,6 +407,27 @@ Registered Servers (2):
 | `No handler registered for packet type` | Plugin load order wrong | mdn-bridge must load before mdn-core. Check `plugins/` directory listing |
 | `Circuit OPEN` | DB/Redis had 5 consecutive failures | Service is recovering — circuit auto-closes after 30s. Check service logs |
 | Server shows as offline | `bungeecord: true` not set | Edit `spigot.yml` on every Paper server |
+
+---
+
+## 🔧 Build Notes (August 4, 2026 — Evening Build)
+
+### Critical fixes in this build:
+
+1. **Redis "Connection reset"** — JedisPoolConfig now has `testOnCreate`, `testOnBorrow`,
+   and `testWhileIdle` validation. Prevents dead connections in Docker/Pterodactyl.
+
+2. **Bridge shadow JAR** — Fixed `jar` task overwriting `shadowJar` on clean builds.
+   Both JARs now properly bundle all dependencies (4.0 MB each).
+
+3. **Startup ordering** — PacketDispatcher created before DeadLetterQueue (no more NPE).
+   MDNAPI initialized on Velocity. BridgeManager decoupled from MDNAPI.
+
+### JAR locations after build:
+```
+mdn-bridge/build/libs/mdn-bridge-1.0.0-SNAPSHOT.jar  (4.0 MB — includes Jackson)
+mdn-core/build/libs/mdn-core-1.0.0-SNAPSHOT.jar      (4.0 MB — includes all deps)
+```
 
 ---
 

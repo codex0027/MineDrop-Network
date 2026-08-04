@@ -2,7 +2,7 @@
 
 > **Purpose**: Every single change — no matter how small — is logged here chronologically.  
 > **For**: New developers onboarding, debugging "why was this done this way", and auditing changes.  
-> **Last Updated**: August 4, 2026
+> **Last Updated**: August 4, 2026 (evening — Redis + Bridge shadow JAR fixes)
 
 ---
 
@@ -271,6 +271,121 @@
 
 ---
 
+## Phase 5 — Startup Lifecycle Fixes (Commit: `847745f`)
+
+### Step 5.1 — PacketDispatcher NullPointerException (Issue #1)
+
+**Root cause**: In `CorePaperPlugin.onEnable()`, Step 7 created `DeadLetterQueue` with a lambda
+that captured `packetDispatcher::dispatch`, but `packetDispatcher` wasn't assigned until Step 8.
+The `this.packetDispatcher` field was null when the lambda was constructed.
+
+| # | Change | File | Details |
+|---|--------|------|---------|
+| 73 | Reordered Steps 7-8 | `CorePaperPlugin.java` | `packetDispatcher = new PacketDispatcher()` now runs BEFORE `deadLetterQueue = new DeadLetterQueue(...)`. The DLQ's retry lambda now captures an already-assigned `packetDispatcher`. |
+
+### Step 5.2 — CoreVelocityPlugin MDNAPI Not Initialized (Issue #3a)
+
+**Root cause**: `CoreVelocityPlugin.onProxyInitialize()` created `PlayerCache` which calls
+`MDNAPI.getInstance().getObjectMapper()` in its constructor. But `MDNAPI.initialize()` was NEVER called
+on Velocity — it was only called in `CorePaperPlugin`. This caused an NPE on Velocity startup.
+
+| # | Change | File | Details |
+|---|--------|------|---------|
+| 74 | Added MDNAPI init | `CoreVelocityPlugin.java` | Added `MDNAPI.initialize(null, redisManager.getJedisPool())` before `PlayerCache` creation. Velocity runs in Redis-only mode (no MySQL). |
+
+### Step 5.3 — BridgeManager Jackson Dependency Decoupling (Issue #3b)
+
+**Root cause**: `BridgeManager.readAndParseSignature()` called `MDNAPI.getInstance().getObjectMapper()`
+to parse `signature.json`. But `BridgeManager.register()` runs during `onLoad()`, which executes BEFORE
+`CorePaperPlugin.onEnable()` where `MDNAPI.initialize()` is called. This created a latent crash if any
+plugin had a `signature.json` file.
+
+| # | Change | File | Details |
+|---|--------|------|---------|
+| 75 | Standalone ObjectMapper | `BridgeManager.java` | BridgeManager now has its own static `OBJECT_MAPPER` field configured identically to MDNAPI's mapper (JavaTimeModule, FAIL_ON_UNKNOWN_PROPERTIES=false, NON_NULL). Zero MDNAPI dependency during onLoad(). |
+| 76 | Removed unused import | `BridgePaperPlugin.java` | Removed `import net.minedrop.api.MDNAPI` and `import net.minedrop.api.security.SecurityUtil` — no longer needed. |
+
+### Step 5.4 — Redis Health Check False-Negatives (Issue #2)
+
+**Root cause**: `RedisManager.isConnected()` used `CompletableFuture.supplyAsync()` which defaults
+to `ForkJoinPool.commonPool()`. Bukkit also uses this pool for async tasks. Under load, the pool
+could starve, causing the 5-second health check timeout to fire before `PING` was ever attempted.
+
+| # | Change | File | Details |
+|---|--------|------|---------|
+| 77 | Dedicated health executor | `RedisManager.java` | Added `healthCheckExecutor` (single-thread daemon executor). `isConnected()` and `executeWithTimeout()` now use this pool instead of ForkJoinPool.commonPool(). Shut down with awaitTermination in `shutdown()`. |
+
+### Step 5.5 — onDisable() Missing redisManager.shutdown()
+
+**Root cause**: `CorePaperPlugin.onDisable()` called `MDNAPI.shutdown()` which closes the JedisPool,
+but never called `redisManager.shutdown()` which stops subscriber threads. Active Redis subscriptions
+were never unsubscribed, causing thread leaks on reload.
+
+| # | Change | File | Details |
+|---|--------|------|---------|
+| 78 | Added redisManager.shutdown() | `CorePaperPlugin.java` | Added `redisManager.shutdown()` between `playerCache.shutdown()` and `MDNAPI.shutdown()` in onDisable(). Subscriber threads are now properly stopped and JedisPool is only closed by MDNAPI after all subscribers are unsubscribed. |
+
+### Step 5.6 — Documentation & Deployment
+
+| # | Change | File | Details |
+|---|--------|------|---------|
+| 79 | Created DEPLOY.md | `DEPLOY.md` | Complete 4-phase Pterodactyl deployment guide: MySQL/Redis setup, Minecraft server creation, plugin upload + config generation, startup order + verification. Includes troubleshooting table and quick reference card. |
+| 80 | Updated config files | `config.yml` × 4 | Added Pterodactyl-oriented comments and CHANGE-ME markers for required fields (server-identity, secret-api-key, database host). |
+
+---
+
+## Phase 6 — Redis Connection Reset & Bridge Shadow JAR Build Fix (Commit: `dddaa76`)
+
+### Step 6.1 — Redis "SocketException: Connection reset" on Publish/Subscribe (Issue #1)
+
+**Root cause**: `JedisPoolConfig` had ZERO connection validation settings. In Docker/Pterodactyl
+environments, Redis closes idle TCP connections (network timeouts, Redis `timeout` config).
+The pool handed out dead connections without checking. First operation on a dead connection
+failed with `SocketException: Connection reset`. Health checks also failed because `isConnected()`
+borrowed a dead connection that couldn't PING.
+
+**Why this wasn't caught earlier**: Local development (localhost Redis) doesn't drop idle connections.
+It only manifests in containerized deployments where Docker's network layer or Redis server config
+closes idle TCP sockets.
+
+| # | Change | File | Details |
+|---|--------|------|---------|
+| 81 | Connection validation | `RedisManager.java` | Added to JedisPoolConfig: `testOnCreate(true)` — validates first connection at pool init; `testOnBorrow(true)` — PING-validates every borrowed connection before use; `testWhileIdle(true)` — periodically evicts dead idle connections; `minEvictableIdleDuration(1min)` + `timeBetweenEvictionRuns(30s)` — eviction timing. |
+
+### Step 6.2 — MDN-Bridge NoClassDefFoundError: com.fasterxml.jackson.databind.Module (Issue #2)
+
+**Root cause (TWO layers)**:
+
+**Layer 1 — Build system bug**: Both `jar` and `shadowJar` tasks in `build.gradle.kts` output to
+the SAME filename (`mdn-bridge-1.0.0-SNAPSHOT.jar`) because both use `archiveClassifier.set("")`.
+On clean builds, Gradle runs `jar` AFTER `shadowJar`, causing the plain 19KB JAR (only Bridge classes,
+zero dependencies) to silently overwrite the 4.0MB shadow JAR (with Jackson, HikariCP, Jedis bundled).
+
+The overwritten JAR contains no Jackson classes → `NoClassDefFoundError` on first class load.
+
+**Layer 2 — Missing explicit dependency**: Even though Jackson was transitively available via
+`implementation(project(":mdn-api"))`, relying solely on transitive resolution is fragile.
+Making it explicit guarantees inclusion regardless of Gradle resolution quirks.
+
+| # | Change | File | Details |
+|---|--------|------|---------|
+| 82 | jar classifier | `mdn-bridge/build.gradle.kts` | Added `archiveClassifier.set("original")` to `tasks.jar`. Plain jar now outputs as `mdn-bridge-1.0.0-SNAPSHOT-original.jar`, never conflicts with shadow JAR. |
+| 83 | jar classifier | `mdn-core/build.gradle.kts` | Same fix — `archiveClassifier.set("original")` on jar task. Prevents the same overwrite bug on clean builds. |
+| 84 | Explicit Jackson deps | `mdn-bridge/build.gradle.kts` | Added `implementation` for jackson-databind, jackson-annotations, jackson-datatype-jsr310 (2.17.2). Guarantees Jackson is bundled in shadow JAR. |
+
+### Step 6.3 — Verification
+
+| Check | Result |
+|-------|--------|
+| mdn-bridge shadow JAR size | 4.0 MB (up from 19 KB — Jackson now included) |
+| mdn-bridge total entries | 2,418 (was 16 — all deps now bundled) |
+| Jackson classes in bridge JAR | 1,212 relocated to `net/minedrop/libs/jackson/` ✅ |
+| Module.class location | `net/minedrop/libs/jackson/jackson/databind/Module.class` ✅ |
+| mdn-core shadow JAR size | 4.0 MB, 2,453 entries ✅ |
+| All 3 plugins build + tests | PASS ✅ |
+
+---
+
 ## Summary Statistics
 
 ### By Phase
@@ -281,7 +396,9 @@
 | Phase 2 (Hardening) | 0* | 11 | 14 | 4 |
 | Phase 3 (Resilience) | 1 | 7 | 6 | 0 |
 | Phase 4 (DLQ + Docs) | 1 | 5 | 4 | 1 |
-| **Total** | **3** | **93** | **25** | **12** |
+| Phase 5 (Startup Fixes) | 1 | 1 | 6 | 0 |
+| Phase 6 (Redis + Shadow Fix) | 1 | 0 | 4 | 0 |
+| **Total** | **5** | **94** | **35** | **12** |
 
 *Phase 2 was bundled with Phase 1 commit
 
@@ -292,8 +409,8 @@
 | mdn-bridge | 5 | 0 | 2 | 7 |
 | mdn-core | 15 | 1 | 2 | 18 |
 | 7 skeletons | 14 | 0 | 0 | 14 |
-| Root docs | DIARY, STEPS, SUGGEST, TIMELINE, README | — | — | 5 |
-| **Total** | **49** | **3** | **5** | **62** |
+| Root docs | DIARY, STEPS, SUGGEST, TIMELINE, README, DEPLOY, FIX-GUIDE, ISSUES | — | — | 8 |
+| **Total** | **49** | **3** | **5** | **65** |
 
 ---
 

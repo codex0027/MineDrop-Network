@@ -23,22 +23,36 @@ import java.util.UUID;
         @JsonSubTypes.Type(value = EconomySyncPacket.class, name = "ECONOMY_SYNC"),
         @JsonSubTypes.Type(value = ModerationActionPacket.class, name = "MODERATION_ACTION"),
         @JsonSubTypes.Type(value = ClanSyncPacket.class, name = "CLAN_SYNC"),
+        @JsonSubTypes.Type(value = ServerHeartbeatPacket.class, name = "SERVER_HEARTBEAT"),
+        @JsonSubTypes.Type(value = PlayerSwitchServerPacket.class, name = "PLAYER_SWITCH_SERVER"),
+        @JsonSubTypes.Type(value = InventoryLockPacket.class, name = "INVENTORY_LOCK"),
 })
 public abstract class MDNPacket {
 
     private final String packetType;
     private final UUID senderId;
     private final long timestamp;
+    private String correlationId;
 
     protected MDNPacket(String packetType, UUID senderId) {
         this.packetType = packetType;
         this.senderId = senderId;
         this.timestamp = System.currentTimeMillis();
+        this.correlationId = MDNAPI.isInitialized()
+                ? MDNAPI.getInstance().getInstanceId() + "-" + timestamp
+                : "uninit-" + timestamp;
     }
 
     public String getPacketType() { return packetType; }
     public UUID getSenderId() { return senderId; }
     public long getTimestamp() { return timestamp; }
+
+    /**
+     * Correlation ID for distributed tracing across servers.
+     * Generated per-packet to track a request's journey.
+     */
+    public String getCorrelationId() { return correlationId; }
+    public void setCorrelationId(String correlationId) { this.correlationId = correlationId; }
 
     /**
      * Serializes this packet to a JSON string for Redis publishing.

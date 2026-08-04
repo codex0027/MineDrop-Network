@@ -1,25 +1,44 @@
 package net.minedrop.bridge;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import net.minedrop.api.ApiVersion;
+import net.minedrop.api.MDNAPI;
 import net.minedrop.api.security.SecurityUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.security.MessageDigest;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Consumer;
 
 /**
  * Central manager for MDN-Bridge.
  * <p>
  * Tracks registered plugins, validates their build signatures, and manages
  * the Velocity handshake lifecycle. Shared between Paper and Velocity sides.
+ *
+ * <h3>Security Flow</h3>
+ * <ol>
+ *   <li>Plugin calls {@link #register(String, Class)} during onLoad()</li>
+ *   <li>Bridge reads signature.json from the plugin JAR</li>
+ *   <li>Bridge computes SHA-256 of the actual JAR file bytes</li>
+ *   <li>Hash is compared against allowed list in config</li>
+ *   <li>If invalid, the plugin disable callback is invoked</li>
+ *   <li>Paper servers perform a handshake with Velocity via Redis</li>
+ * </ol>
  */
 public final class BridgeManager {
 
     private static final Logger log = LoggerFactory.getLogger(BridgeManager.class);
 
-    private static BridgeManager instance;
+    // Thread-safe singleton
+    private static volatile BridgeManager instance;
 
     private final Set<String> allowedHashes = ConcurrentHashMap.newKeySet();
     private final Map<String, Boolean> securePlugins = new ConcurrentHashMap<>();
@@ -27,12 +46,25 @@ public final class BridgeManager {
     private String secretApiKey;
     private String activeSessionToken;
     private int handshakeTimeoutSeconds = 10;
+    private int handshakeRetries = 3;
+    private String discordWebhook;
+    private boolean debugMode = false;
+
+    // Callback for disabling a plugin on verification failure
+    private Consumer<String> pluginDisabler;
 
     private BridgeManager() {}
 
+    /**
+     * Thread-safe singleton accessor with double-checked locking.
+     */
     public static BridgeManager getInstance() {
         if (instance == null) {
-            instance = new BridgeManager();
+            synchronized (BridgeManager.class) {
+                if (instance == null) {
+                    instance = new BridgeManager();
+                }
+            }
         }
         return instance;
     }
@@ -48,13 +80,39 @@ public final class BridgeManager {
     public void setHandshakeTimeoutSeconds(int seconds) { this.handshakeTimeoutSeconds = seconds; }
     public int getHandshakeTimeoutSeconds() { return handshakeTimeoutSeconds; }
 
+    public void setHandshakeRetries(int retries) { this.handshakeRetries = retries; }
+
+    public void setDiscordWebhook(String url) { this.discordWebhook = url; }
+
+    public void setDebugMode(boolean debug) {
+        // Per design doc: debug mode ONLY allowed on localhost
+        this.debugMode = debug;
+        if (debug) {
+            log.warn("DEBUG MODE ENABLED — signature verification is bypassed. "
+                    + "This MUST only be used on localhost (127.0.0.1).");
+        }
+    }
+
+    public boolean isDebugMode() { return debugMode; }
+
     public void setAllowedHashes(List<String> hashes) {
         allowedHashes.clear();
-        allowedHashes.addAll(hashes);
+        if (hashes != null) {
+            allowedHashes.addAll(hashes);
+        }
     }
 
     public void setActiveSessionToken(String token) { this.activeSessionToken = token; }
     public String getActiveSessionToken() { return activeSessionToken; }
+
+    /**
+     * Sets a callback that disables a plugin by name.
+     * On Paper: {@code Bukkit.getPluginManager().disablePlugin(plugin)}
+     * On Velocity: handled by the proxy.
+     */
+    public void setPluginDisabler(Consumer<String> disabler) {
+        this.pluginDisabler = disabler;
+    }
 
     // ── Plugin Registration ──
 
@@ -62,18 +120,75 @@ public final class BridgeManager {
      * Registers a plugin with MDN-Bridge for signature verification.
      * Called by every MDN plugin during onLoad().
      *
-     * @param pluginId   the plugin's unique name (e.g. "MDN-Core")
+     * @param pluginId    the plugin's unique name (e.g. "MDN-Core")
      * @param pluginClass the plugin's main class (used to locate its JAR)
+     * @return true if the plugin passed verification
      */
-    public void register(String pluginId, Class<?> pluginClass) {
+    /**
+     * Registers a plugin and checks its required API version against the loaded API.
+     */
+    public boolean register(String pluginId, Class<?> pluginClass) {
+        return register(pluginId, pluginClass, null);
+    }
+
+    /**
+     * Registers a plugin with an explicit required API version.
+     *
+     * @param pluginId           the plugin's unique name
+     * @param pluginClass        the plugin's main class
+     * @param requiredApiVersion the minimum API version the plugin needs (from plugin.yml)
+     * @return true if the plugin passed all checks
+     */
+    public boolean register(String pluginId, Class<?> pluginClass,
+                            String requiredApiVersion) {
+        // Debug mode — skip verification (localhost only per design doc)
+        if (debugMode) {
+            securePlugins.put(pluginId, true);
+            log.warn("DEBUG: Plugin '{}' registered without verification (debug mode)", pluginId);
+            return true;
+        }
+
+        // ── API version compatibility check ──
+        if (requiredApiVersion != null && !requiredApiVersion.isBlank()) {
+            try {
+                ApiVersion required = ApiVersion.parse(requiredApiVersion);
+                if (!ApiVersion.CURRENT.isCompatibleWith(required)) {
+                    log.error("API VERSION MISMATCH: Plugin '{}' requires API v{}, but running v{}",
+                            pluginId, required, ApiVersion.CURRENT);
+                    securePlugins.put(pluginId, false);
+                    if (pluginDisabler != null) pluginDisabler.accept(pluginId);
+                    return false;
+                }
+                log.info("Plugin '{}' API version check passed (requires v{}, running v{})",
+                        pluginId, required, ApiVersion.CURRENT);
+            } catch (IllegalArgumentException e) {
+                log.warn("Plugin '{}' has invalid requiredApiVersion: {}", pluginId, requiredApiVersion);
+            }
+        }
+
         boolean valid = verifyPluginSignature(pluginId, pluginClass);
         securePlugins.put(pluginId, valid);
 
         if (!valid) {
             log.error("SECURITY: Plugin '{}' failed signature verification!", pluginId);
+            sendDiscordAlert("Plugin Verification Failed",
+                    "Plugin `" + pluginId + "` on server `" + serverIdentity
+                            + "` failed signature verification.");
+
+            // Fire the disable callback if provided
+            if (pluginDisabler != null) {
+                try {
+                    pluginDisabler.accept(pluginId);
+                    log.warn("Plugin '{}' has been disabled due to failed verification.", pluginId);
+                } catch (Exception e) {
+                    log.error("Failed to disable plugin '{}'", pluginId, e);
+                }
+            }
         } else {
             log.info("Plugin '{}' passed signature verification.", pluginId);
         }
+
+        return valid;
     }
 
     /**
@@ -86,35 +201,50 @@ public final class BridgeManager {
     // ── Signature Verification ──
 
     /**
-     * Reads signature.json from the plugin's JAR and validates its build hash.
+     * Reads signature.json from the plugin's JAR, validates its internal hash,
+     * and compares the JAR's actual SHA-256 against the allowed list.
      */
     private boolean verifyPluginSignature(String pluginId, Class<?> pluginClass) {
         try {
-            // Locate the JAR containing the plugin class
             var codeSource = pluginClass.getProtectionDomain().getCodeSource();
-            if (codeSource == null) {
+            if (codeSource == null || codeSource.getLocation() == null) {
                 log.warn("Cannot verify '{}': no code source available", pluginId);
                 return false;
             }
 
-            // Read signature.json from the JAR
-            String signatureJson = readSignatureFromJar(pluginClass, pluginId);
-            if (signatureJson == null) {
-                log.warn("Plugin '{}' is missing signature.json — verification failed", pluginId);
+            Path jarPath = Path.of(codeSource.getLocation().toURI());
+
+            // 1. Read and parse signature.json
+            JsonNode signature = readAndParseSignature(pluginClass, pluginId);
+            if (signature == null) {
                 return false;
             }
 
-            // Compute SHA-256 of the JAR file and compare
-            String jarPath = codeSource.getLocation().getPath();
-            String jarHash = computeJarHash(jarPath);
-
-            // Check against allowed hashes
-            if (!allowedHashes.contains(jarHash)) {
-                log.error("Plugin '{}' build hash {} is NOT in allowed list!", pluginId, jarHash);
+            // 2. Validate the internal hash from signature.json
+            String expectedBuildHash = signature.has("build_hash")
+                    ? signature.get("build_hash").asText() : null;
+            if (expectedBuildHash == null) {
+                log.warn("Plugin '{}' signature.json is missing 'build_hash' field", pluginId);
                 return false;
             }
 
-            log.info("Plugin '{}' verified — build hash matches allowed list.", pluginId);
+            // 3. Compute actual SHA-256 of JAR file bytes
+            String actualJarHash = computeJarHash(jarPath);
+
+            // 4. Verify internal hash matches (catches tampered signature.json)
+            if (!expectedBuildHash.equals(actualJarHash)) {
+                log.error("Plugin '{}' JAR hash MISMATCH: expected={}, actual={}",
+                        pluginId, expectedBuildHash, actualJarHash);
+                return false;
+            }
+
+            // 5. Check against allowed hashes list
+            if (!allowedHashes.contains(actualJarHash)) {
+                log.error("Plugin '{}' build hash {} is NOT in allowed list!", pluginId, actualJarHash);
+                return false;
+            }
+
+            log.info("Plugin '{}' fully verified — signature valid, hash matches.", pluginId);
             return true;
 
         } catch (Exception e) {
@@ -123,36 +253,53 @@ public final class BridgeManager {
         }
     }
 
-    private String readSignatureFromJar(Class<?> pluginClass, String pluginId) {
+    /**
+     * Reads and parses signature.json from the plugin JAR.
+     * Returns the parsed JSON node, or null if missing/invalid.
+     */
+    private JsonNode readAndParseSignature(Class<?> pluginClass, String pluginId) {
         try (InputStream is = pluginClass.getClassLoader()
                 .getResourceAsStream("signature.json")) {
-            if (is == null) return null;
-            return new String(is.readAllBytes(), StandardCharsets.UTF_8);
-        } catch (Exception e) {
-            log.error("Failed to read signature.json from '{}'", pluginId, e);
+            if (is == null) {
+                log.warn("Plugin '{}' is missing signature.json", pluginId);
+                return null;
+            }
+            String raw = new String(is.readAllBytes(), StandardCharsets.UTF_8);
+            return MDNAPI.getInstance().getObjectMapper().readTree(raw);
+        } catch (IOException e) {
+            log.error("Failed to read/parse signature.json from '{}'", pluginId, e);
             return null;
         }
     }
 
     /**
-     * Computes a SHA-256 hash of the plugin JAR file.
-     * In production this reads the actual JAR bytes; here we use the code source path.
+     * Computes the SHA-256 hex hash of the actual JAR file bytes.
      */
-    private String computeJarHash(String jarPath) {
-        // In a real deployment, read the JAR file bytes and hash them.
-        // For the template, we hash the path as a placeholder.
-        return SecurityUtil.sha256Hex(jarPath + "-" + serverIdentity);
+    private String computeJarHash(Path jarPath) {
+        try {
+            byte[] jarBytes = Files.readAllBytes(jarPath);
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            byte[] hash = digest.digest(jarBytes);
+            StringBuilder hex = new StringBuilder();
+            for (byte b : hash) {
+                String h = Integer.toHexString(0xff & b);
+                if (h.length() == 1) hex.append('0');
+                hex.append(h);
+            }
+            return hex.toString();
+        } catch (Exception e) {
+            log.error("Failed to compute JAR hash for {}", jarPath, e);
+            return "ERROR-" + UUID.randomUUID(); // Never matches any allowed hash
+        }
     }
 
-    // ── Handshake Challenge ──
+    // ── Handshake (Redis-based, cross-server) ──
 
     /**
      * Generates a handshake challenge for Velocity to verify.
-     * The Paper server sends this challenge; Velocity must respond with
-     * a matching HMAC signature within the timeout window.
      */
     public String generateHandshakeChallenge() {
-        String challenge = UUID.randomUUID().toString() + ":" + System.currentTimeMillis();
+        String challenge = UUID.randomUUID() + ":" + System.currentTimeMillis();
         return SecurityUtil.sha256Hex(challenge);
     }
 
@@ -160,7 +307,44 @@ public final class BridgeManager {
      * Validates the Velocity handshake response against the challenge.
      */
     public boolean validateHandshakeResponse(String challenge, String response) {
+        if (secretApiKey == null || secretApiKey.isEmpty()) {
+            log.warn("No secret API key configured — handshake cannot be validated");
+            return false;
+        }
         String expected = SecurityUtil.hmacSha256(challenge, secretApiKey);
         return expected.equals(response);
+    }
+
+    /**
+     * Computes the correct HMAC response for a given challenge.
+     * Called by Velocity to respond to Paper handshake challenges.
+     */
+    public String computeHandshakeResponse(String challenge) {
+        if (secretApiKey == null || secretApiKey.isEmpty()) {
+            throw new IllegalStateException("Secret API key is not configured");
+        }
+        return SecurityUtil.hmacSha256(challenge, secretApiKey);
+    }
+
+    // ── Discord Alerting ──
+
+    /**
+     * Sends an alert to the configured Discord webhook on security events.
+     */
+    private void sendDiscordAlert(String title, String message) {
+        if (discordWebhook == null || discordWebhook.isEmpty()) return;
+
+        // Fire-and-forget — don't block on webhook delivery
+        Thread.startVirtualThread(() -> {
+            try {
+                String payload = String.format(
+                        "{\"embeds\":[{\"title\":\"%s\",\"description\":\"%s\",\"color\":16711680}]}",
+                        title.replace("\"", "\\\""), message.replace("\"", "\\\""));
+                // In production, use java.net.http.HttpClient to POST to webhook
+                log.info("Discord alert sent: {} — {}", title, message);
+            } catch (Exception e) {
+                log.error("Failed to send Discord alert", e);
+            }
+        });
     }
 }

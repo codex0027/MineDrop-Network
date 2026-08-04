@@ -37,7 +37,10 @@ dependencies {
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
 
-tasks.test { useJUnitPlatform() }
+tasks.test {
+    dependsOn(":mdn-bridge:shadowJar")
+    useJUnitPlatform()
+}
 
 tasks.shadowJar {
     dependsOn(":mdn-bridge:shadowJar")

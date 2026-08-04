@@ -10,50 +10,85 @@ import org.slf4j.LoggerFactory;
 
 import java.util.Map;
 import java.util.UUID;
-import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.*;
 
 /**
- * Redis-backed cache for frequently accessed player data.
+ * Redis-backed cache for frequently accessed player data with automatic eviction.
  * <p>
- * Stores: coins, clan membership, permissions, prestige data, active boosts,
- * protection status, and current server location.
+ * Entries are evicted from the local in-memory cache after 10 minutes of inactivity.
+ * This prevents memory leaks from disconnected players whose invalidate() call was missed.
  */
 public final class PlayerCache {
 
     private static final Logger log = LoggerFactory.getLogger(PlayerCache.class);
 
+    /** Local cache entries expire after 10 minutes of inactivity. */
+    private static final long LOCAL_CACHE_TTL_MS = 10 * 60 * 1000;
+
     private final RedisManager redisManager;
     private final ObjectMapper objectMapper;
 
-    // Local in-memory cache for ultra-fast access
-    private final Map<UUID, CachedPlayer> localCache = new ConcurrentHashMap<>();
+    // Local in-memory cache with last-access timestamps
+    private final Map<UUID, CacheEntry> localCache = new ConcurrentHashMap<>();
+
+    private final ScheduledExecutorService cleanupScheduler
+            = Executors.newSingleThreadScheduledExecutor(r -> {
+        Thread t = new Thread(r, "mdn-player-cache-cleanup");
+        t.setDaemon(true);
+        return t;
+    });
 
     public PlayerCache(RedisManager redisManager) {
         this.redisManager = redisManager;
         this.objectMapper = MDNAPI.getInstance().getObjectMapper();
+
+        // Evict stale entries every 5 minutes
+        cleanupScheduler.scheduleAtFixedRate(this::evictStaleEntries,
+                5, 5, TimeUnit.MINUTES);
     }
 
     /**
-     * Loads a player's cached data from Redis (or local cache).
+     * Loads a player's cached data, preferring local cache over Redis.
      */
     public CachedPlayer getPlayer(UUID uuid) {
-        return localCache.computeIfAbsent(uuid, this::loadFromRedis);
+        CacheEntry entry = localCache.computeIfAbsent(uuid, k -> new CacheEntry(loadFromRedis(uuid)));
+        entry.touch();
+        return entry.player;
     }
 
     /**
      * Updates a player's cached data and syncs to Redis.
      */
     public void updatePlayer(UUID uuid, CachedPlayer player) {
-        localCache.put(uuid, player);
+        localCache.put(uuid, new CacheEntry(player));
         saveToRedis(uuid, player);
     }
 
     /**
-     * Removes a player from cache (on disconnect).
+     * Removes a player from cache (on graceful disconnect).
      */
     public void invalidate(UUID uuid) {
         localCache.remove(uuid);
         redisManager.delete(MDNCore.KEY_PLAYER_CACHE + uuid);
+    }
+
+    /**
+     * Evicts entries that haven't been accessed within the TTL window.
+     */
+    private void evictStaleEntries() {
+        long cutoff = System.currentTimeMillis() - LOCAL_CACHE_TTL_MS;
+        int removed = 0;
+        var it = localCache.entrySet().iterator();
+        while (it.hasNext()) {
+            var entry = it.next();
+            if (entry.getValue().lastAccess < cutoff) {
+                it.remove();
+                removed++;
+            }
+        }
+        if (removed > 0) {
+            log.debug("Evicted {} stale player cache entries", removed);
+        }
     }
 
     private CachedPlayer loadFromRedis(UUID uuid) {
@@ -74,6 +109,28 @@ public final class PlayerCache {
             redisManager.setWithExpiry(MDNCore.KEY_PLAYER_CACHE + uuid, json, 1200);
         } catch (JsonProcessingException e) {
             log.error("Failed to serialize player cache for {}", uuid, e);
+        }
+    }
+
+    public void shutdown() {
+        cleanupScheduler.shutdown();
+        localCache.clear();
+    }
+
+    // ── Inner types ──
+
+    /** Wrapper that tracks last access time for eviction. */
+    private static class CacheEntry {
+        final CachedPlayer player;
+        volatile long lastAccess;
+
+        CacheEntry(CachedPlayer player) {
+            this.player = player;
+            this.lastAccess = System.currentTimeMillis();
+        }
+
+        void touch() {
+            this.lastAccess = System.currentTimeMillis();
         }
     }
 

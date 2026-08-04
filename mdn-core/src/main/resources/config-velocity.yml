@@ -1,0 +1,38 @@
+# =============================================================================
+# MDN-Core Velocity Configuration
+# =============================================================================
+
+redis:
+  host: "127.0.0.1"
+  port: 6379
+  password: ""
+  connection-timeout-ms: 2000
+  pubsub-channel: "mdn_packet_bus"
+
+network:
+  save-interval-seconds: 300
+  session-expiry-seconds: 1200
+
+# ── Commands that can be toggled on/off ──
+commands:
+  hub: true
+  lobby: true
+  spawn: true
+  website: true
+  store: true
+  vote: true
+  discord: true
+  help: true
+  rules: true
+
+# ── Smart routing ──
+routing:
+  region-enabled: false
+  default-region: "EU"
+  regions:
+    EU:
+      - "lobby-eu-01"
+    NA:
+      - "lobby-na-01"
+    ASIA:
+      - "lobby-asia-01"

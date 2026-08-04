@@ -1,0 +1,16 @@
+# =============================================================================
+# MDN-Bridge Velocity Configuration
+# =============================================================================
+
+bridge:
+  # Unique identifier for this Velocity proxy
+  server-identity: "velocity-proxy-01"
+
+  # AES-encrypted API key — must match Paper servers
+  secret-api-key: "ENC(mD9xK1w8P2qR4sT5uW8zY1x3v5b7n9m0)"
+
+  # Maximum seconds to wait for Paper handshake confirmation
+  handshake-timeout-seconds: 10
+
+  # Number of retry attempts before declaring failure
+  handshake-retries: 3

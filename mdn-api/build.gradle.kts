@@ -25,6 +25,7 @@ dependencies {
     // Jackson — JSON serialization
     api("com.fasterxml.jackson.core:jackson-databind:2.17.2")
     api("com.fasterxml.jackson.core:jackson-annotations:2.17.2")
+    api("com.fasterxml.jackson.datatype:jackson-datatype-jsr310:2.17.2")
 
     // HikariCP — connection pool
     api("com.zaxxer:HikariCP:5.1.0")

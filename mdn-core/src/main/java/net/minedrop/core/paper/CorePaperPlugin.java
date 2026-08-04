@@ -89,18 +89,21 @@ public final class CorePaperPlugin extends JavaPlugin implements Listener {
         MDNAPI.initialize(databaseManager.getDataSource(), redisManager.getJedisPool());
         getLogger().info("MDN-API initialized (instance: " + MDNAPI.getInstance().getInstanceId() + ")");
 
-        // ── Step 7: Initialize Dead Letter Queue ──
+        // ── Step 7: Initialize subsystems (create PacketDispatcher FIRST) ──
+        // Order matters: DeadLetterQueue's retry lambda captures packetDispatcher,
+        // so packetDispatcher MUST exist before deadLetterQueue is created.
+        playerCache = new PlayerCache(redisManager);
+        inventorySyncManager = new InventorySyncManager();
+        dataSyncEngine = new DataSyncEngine(redisManager, inventorySyncManager);
+        packetDispatcher = new PacketDispatcher();
+
+        // ── Step 8: Initialize Dead Letter Queue ──
+        // Now safe: packetDispatcher is already assigned and ready for retry dispatch
         deadLetterQueue = new DeadLetterQueue(redisManager, rawJson -> {
             // Retry handler: re-dispatch through the packet dispatcher
             packetDispatcher.dispatch(rawJson);
         });
         packetDispatcher.setDeadLetterQueue(deadLetterQueue);
-
-        // ── Step 8: Initialize subsystems ──
-        playerCache = new PlayerCache(redisManager);
-        inventorySyncManager = new InventorySyncManager();
-        dataSyncEngine = new DataSyncEngine(redisManager, inventorySyncManager);
-        packetDispatcher = new PacketDispatcher();
 
         // ── Step 9: Start periodic tasks ──
         startPeriodicSave();
@@ -131,6 +134,9 @@ public final class CorePaperPlugin extends JavaPlugin implements Listener {
         if (deadLetterQueue != null) deadLetterQueue.shutdown();
         if (dataSyncEngine != null) dataSyncEngine.shutdown();
         if (playerCache != null) playerCache.shutdown();
+        // Shut down Redis BEFORE MDNAPI — RedisManager owns the subscriber threads
+        // and must clean them up before the pool is closed by MDNAPI
+        if (redisManager != null) redisManager.shutdown();
         MDNAPI.shutdown();
         if (databaseManager != null) databaseManager.shutdown();
 

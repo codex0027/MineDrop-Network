@@ -82,6 +82,12 @@ public final class CoreVelocityPlugin {
         redisManager = new RedisManager(redisHost, redisPort, redisPassword,
                 2000, "mdn_packet_bus");
 
+        // ── Initialize MDN-API (Velocity needs ObjectMapper, not database) ──
+        // CoreVelocityPlugin runs without MySQL; only Redis is available.
+        // MDNAPI must be initialized before PlayerCache (which calls getObjectMapper()).
+        MDNAPI.initialize(null, redisManager.getJedisPool());
+        logger.info("MDN-API initialized on Velocity (Redis-only mode)");
+
         // ── Initialize subsystems ──
         playerCache = new PlayerCache(redisManager);
         serverRegistry = new ServerRegistry(redisManager);

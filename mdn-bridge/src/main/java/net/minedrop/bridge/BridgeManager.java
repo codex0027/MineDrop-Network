@@ -1,8 +1,12 @@
 package net.minedrop.bridge;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
+import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.SerializationFeature;
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import net.minedrop.api.ApiVersion;
-import net.minedrop.api.MDNAPI;
 import net.minedrop.api.security.SecurityUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -44,6 +48,18 @@ public final class BridgeManager {
 
     // Thread-safe singleton
     private static volatile BridgeManager instance;
+
+    /**
+     * Standalone ObjectMapper for signature.json parsing.
+     * Bridge MUST NOT depend on MDNAPI for JSON parsing because
+     * BridgeManager.register() is called during onLoad(), which runs
+     * before MDNAPI is initialized by CorePaperPlugin.onEnable().
+     */
+    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper()
+            .registerModule(new JavaTimeModule())
+            .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false)
+            .configure(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS, false)
+            .setSerializationInclusion(JsonInclude.Include.NON_NULL);
 
     private final Set<String> allowedHashes = ConcurrentHashMap.newKeySet();
     private final Map<String, Boolean> securePlugins = new ConcurrentHashMap<>();
@@ -267,7 +283,7 @@ public final class BridgeManager {
                 return null;
             }
             String raw = new String(is.readAllBytes(), StandardCharsets.UTF_8);
-            return MDNAPI.getInstance().getObjectMapper().readTree(raw);
+            return OBJECT_MAPPER.readTree(raw);
         } catch (IOException e) {
             log.error("Failed to read/parse signature.json from '{}'", pluginId, e);
             return null;

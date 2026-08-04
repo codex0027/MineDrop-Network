@@ -33,6 +33,16 @@ public final class RedisManager {
         return t;
     });
 
+    /**
+     * Dedicated executor for health checks so they never contend with
+     * ForkJoinPool.commonPool() or Bukkit async workers.
+     */
+    private final ExecutorService healthCheckExecutor = Executors.newSingleThreadExecutor(r -> {
+        Thread t = new Thread(r, "mdn-redis-health");
+        t.setDaemon(true);
+        return t;
+    });
+
     public RedisManager(String host, int port, String password, int timeoutMs, String pubSubChannel) {
         JedisPoolConfig poolConfig = new JedisPoolConfig();
         poolConfig.setMaxTotal(20);
@@ -172,6 +182,8 @@ public final class RedisManager {
 
     /**
      * Checks connection health with a hard timeout.
+     * Uses a dedicated executor to avoid ForkJoinPool.commonPool() starvation
+     * which could produce false-negative health check results.
      */
     public boolean isConnected() {
         try {
@@ -179,7 +191,7 @@ public final class RedisManager {
                 try (Jedis jedis = jedisPool.getResource()) {
                     return "PONG".equals(jedis.ping());
                 }
-            }).get(5, TimeUnit.SECONDS);
+            }, healthCheckExecutor).get(5, TimeUnit.SECONDS);
         } catch (TimeoutException e) {
             log.warn("Redis health check timed out after 5s");
             return false;
@@ -252,6 +264,17 @@ public final class RedisManager {
             }
         } catch (InterruptedException e) {
             subscriberThreads.shutdownNow();
+            Thread.currentThread().interrupt();
+        }
+
+        // Shut down health check executor
+        healthCheckExecutor.shutdown();
+        try {
+            if (!healthCheckExecutor.awaitTermination(2, TimeUnit.SECONDS)) {
+                healthCheckExecutor.shutdownNow();
+            }
+        } catch (InterruptedException e) {
+            healthCheckExecutor.shutdownNow();
             Thread.currentThread().interrupt();
         }
 

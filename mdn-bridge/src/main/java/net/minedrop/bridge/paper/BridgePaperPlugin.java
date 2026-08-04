@@ -1,7 +1,5 @@
 package net.minedrop.bridge.paper;
 
-import net.minedrop.api.MDNAPI;
-import net.minedrop.api.security.SecurityUtil;
 import net.minedrop.bridge.BridgeManager;
 import org.bukkit.Bukkit;
 import org.bukkit.plugin.Plugin;

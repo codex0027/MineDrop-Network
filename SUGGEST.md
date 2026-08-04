@@ -14,7 +14,9 @@
 | 🔜 Planned (Near Future) | 5 |
 | 📋 Future Consideration | 10 |
 | ❌ Rejected / Deferred | 2 |
-| **Total** | **41** |
+| **Total** | **42** |
+
+> **📋 See also**: [ISSUES.md](ISSUES.md) — 36 bugs, gaps, and code smells found during deep audit (Aug 4, 2026)
 
 ---
 

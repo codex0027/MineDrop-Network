@@ -30,7 +30,7 @@ dependencies {
     implementation("com.zaxxer:HikariCP:5.1.0")
     implementation("redis.clients:jedis:5.1.3")
     implementation("com.fasterxml.jackson.core:jackson-databind:2.17.2")
-    implementation("org.slf4j:slf4j-api:2.0.13")
+    compileOnly("org.slf4j:slf4j-api:2.0.13")  // Velocity provides SLF4J — do NOT bundle
 
     testImplementation(platform("org.junit:junit-bom:5.11.0"))
     testImplementation("org.junit.jupiter:junit-jupiter")
@@ -48,7 +48,7 @@ tasks.shadowJar {
     relocate("com.fasterxml", "net.minedrop.libs.jackson")
     relocate("com.zaxxer.hikari", "net.minedrop.libs.hikari")
     relocate("redis.clients.jedis", "net.minedrop.libs.jedis")
-    relocate("org.slf4j", "net.minedrop.libs.slf4j")
+    // SLF4J NOT relocated — Velocity injects it via Guice
 }
 
 tasks.jar {

@@ -1,9 +1,0 @@
-{
-  "id": "${pluginName}",
-  "name": "MDN-Core",
-  "version": "${version}",
-  "main": "${mainClass}",
-  "dependencies": [{ "id": "${dependsOn}" }],
-  "authors": ["MineDrop Network"],
-  "description": "Network heartbeat — sessions, routing, cache, and shared infrastructure"
-}

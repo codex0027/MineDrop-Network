@@ -1,8 +1,0 @@
-{
-  "id": "${pluginName}",
-  "name": "MDN-Bridge",
-  "version": "${version}",
-  "main": "${mainClass}",
-  "authors": ["MineDrop Network"],
-  "description": "Security foundation — plugin validation, handshake, and runtime integrity"
-}

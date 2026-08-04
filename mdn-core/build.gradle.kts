@@ -51,7 +51,11 @@ tasks.shadowJar {
     // SLF4J NOT relocated — Velocity injects it via Guice
 }
 
+// Output the plain jar with a classifier so it never overwrites the shadow JAR.
+// Both jar and shadowJar use archiveClassifier.set("") which targets the same
+// filename; on clean builds jar runs after shadowJar and silently replaces it.
 tasks.jar {
+    archiveClassifier.set("original")
     duplicatesStrategy = DuplicatesStrategy.EXCLUDE
 }
 

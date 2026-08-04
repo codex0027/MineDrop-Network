@@ -22,6 +22,16 @@ dependencies {
 
     implementation(project(":mdn-api"))
 
+    // Jackson — required by BridgeManager's standalone ObjectMapper.
+    // Declared explicitly (even though transitively reachable via mdn-api)
+    // to guarantee inclusion in the shadow JAR across all build environments.
+    // Jackson — required by BridgeManager's standalone ObjectMapper.
+    // Declared explicitly (even though transitively reachable via mdn-api)
+    // to guarantee inclusion in the shadow JAR across all build environments.
+    implementation("com.fasterxml.jackson.core:jackson-databind:2.17.2")
+    implementation("com.fasterxml.jackson.core:jackson-annotations:2.17.2")
+    implementation("com.fasterxml.jackson.datatype:jackson-datatype-jsr310:2.17.2")
+
     compileOnly("io.papermc.paper:paper-api:1.21.1-R0.1-SNAPSHOT")
     compileOnly("com.velocitypowered:velocity-api:3.3.0-SNAPSHOT")
     annotationProcessor("com.velocitypowered:velocity-api:3.3.0-SNAPSHOT")
@@ -40,7 +50,11 @@ tasks.shadowJar {
     relocate("redis.clients.jedis", "net.minedrop.libs.jedis")
 }
 
+// Output the plain jar with a classifier so it never overwrites the shadow JAR.
+// Both jar and shadowJar use archiveClassifier.set("") which targets the same
+// filename; on clean builds jar runs after shadowJar and silently replaces it.
 tasks.jar {
+    archiveClassifier.set("original")
     duplicatesStrategy = DuplicatesStrategy.EXCLUDE
 }
 

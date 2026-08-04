@@ -50,6 +50,19 @@ public final class RedisManager {
         poolConfig.setMinIdle(2);
         poolConfig.setMaxWait(Duration.ofMillis(timeoutMs));
 
+        // ── Connection validation ──
+        // Without these, the pool hands out dead connections when Redis closes
+        // idle ones (common in Docker/Pterodactyl environments). This causes
+        // "SocketException: Connection reset" on first publish/subscribe.
+        // testOnCreate: validates the very first connection on pool creation
+        // testOnBorrow: validates connection with PING before every borrow
+        // testWhileIdle: periodically evicts dead idle connections from pool
+        poolConfig.setTestOnCreate(true);
+        poolConfig.setTestOnBorrow(true);
+        poolConfig.setTestWhileIdle(true);
+        poolConfig.setMinEvictableIdleDuration(Duration.ofMinutes(1));
+        poolConfig.setTimeBetweenEvictionRuns(Duration.ofSeconds(30));
+
         if (password != null && !password.isEmpty()) {
             this.jedisPool = new JedisPool(poolConfig, host, port, timeoutMs, password);
         } else {

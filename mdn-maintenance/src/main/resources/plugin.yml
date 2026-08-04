@@ -1,0 +1,7 @@
+name: MDN-Maintenance
+version: ${version}
+main: ${mainClass}
+api-version: "1.21"
+depend: [MDN-Core]
+author: MineDrop Network
+description: Maintenance — whitelist, scheduled restarts, emergency shutdown

@@ -1,0 +1,12 @@
+{
+  "id": "mdn-auth",
+  "name": "MDN-Auth",
+  "version": "${version}",
+  "main": "net.minedrop.auth.AuthVelocityPlugin",
+  "dependencies": [
+    { "id": "mdn-bridge" },
+    { "id": "mdn-core" }
+  ],
+  "authors": ["MineDrop Network"],
+  "description": "Authentication — login, 2FA, alt detection, device fingerprinting"
+}

@@ -1,0 +1,8 @@
+name: MDN-Communication
+version: ${version}
+main: ${mainClass}
+api-version: "1.21"
+depend: [MDN-Core]
+softdepend: [PlaceholderAPI]
+author: MineDrop Network
+description: Communication — global chat, private messages, Discord bridge, filters

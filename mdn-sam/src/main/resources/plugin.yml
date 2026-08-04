@@ -1,0 +1,8 @@
+name: MDN-SAM
+version: ${version}
+main: ${mainClass}
+api-version: "1.21"
+depend: [MDN-Core, MDN-Economy]
+softdepend: [WorldEdit, Vault, PlaceholderAPI, FancyNpcs, FancyHolograms, MythicMobs, ModelEngine, ItemsAdder]
+author: MineDrop Network
+description: Steal a Mineling — conveyor belts, bases, statue capturing, stealing, destroyers, leaderboards

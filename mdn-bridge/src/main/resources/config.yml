@@ -1,0 +1,32 @@
+# =============================================================================
+# MDN-Bridge Security Configuration
+# =============================================================================
+
+bridge:
+  # Unique identifier for this server instance
+  server-identity: "paper-lobby-01"
+
+  # AES-encrypted API key for Velocity <-> Paper handshake
+  secret-api-key: "ENC(mD9xK1w8P2qR4sT5uW8zY1x3v5b7n9m0)"
+
+  # Maximum seconds to wait for Velocity handshake response
+  handshake-timeout-seconds: 10
+
+  # SHA-256 hashes of allowed plugin builds
+  # Add new build hashes here when releasing updated plugin versions
+  allowed-build-hashes:
+    - "a1e89b4f2c03e6d19f8a3c57e2d960b123456789abcdef0123456789abcdef01"
+    - "f9d8c7b6a5e4d3c2b1a0f9e8d7c6b5a43210fedcba9876543210fedcba987654"
+
+# ── What to do when verification fails ──
+verification-failure:
+  # Options: SHUTDOWN, DISABLE_PLUGIN, WARN_STAFF
+  action: "SHUTDOWN"
+
+  # Discord webhook for security alerts
+  alert-webhook: "https://discord.com/api/webhooks/security-alerts"
+
+# ── Developer settings ──
+# WARNING: debug-mode only works on localhost (127.0.0.1).
+# If enabled on a public IP, it will be forcibly disabled.
+debug-mode: false

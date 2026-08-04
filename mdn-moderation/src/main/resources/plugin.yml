@@ -1,0 +1,8 @@
+name: MDN-Moderation
+version: ${version}
+main: ${mainClass}
+api-version: "1.21"
+depend: [MDN-Core]
+softdepend: [TAB]
+author: MineDrop Network
+description: Moderation — ban, mute, kick, freeze, vanish, staff mode, screenshare

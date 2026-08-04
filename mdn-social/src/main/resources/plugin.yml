@@ -1,0 +1,7 @@
+name: MDN-Social
+version: ${version}
+main: ${mainClass}
+api-version: "1.21"
+depend: [MDN-Core]
+author: MineDrop Network
+description: Social — friends, clans/teams, clan leveling, shared vaults

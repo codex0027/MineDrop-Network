@@ -1,0 +1,1 @@
+{"id":"mdn-maintenance","name":"MDN-Maintenance","version":"${version}","main":"${mainClass}","dependencies":[{"id":"mdn-core"}],"authors":["MineDrop Network"],"description":"Maintenance — whitelist, restarts, emergency shutdown"}

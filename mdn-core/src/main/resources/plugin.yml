@@ -1,0 +1,8 @@
+name: ${pluginName}
+version: ${version}
+main: ${mainClass}
+api-version: "${apiVersion}"
+depend: [${dependsOn}]
+softdepend: [${softDependsOn}]
+author: MineDrop Network
+description: Network heartbeat — sessions, routing, cache, data sync, and shared infrastructure

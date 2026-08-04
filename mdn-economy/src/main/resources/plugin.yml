@@ -1,0 +1,8 @@
+name: MDN-Economy
+version: ${version}
+main: ${mainClass}
+api-version: "1.21"
+depend: [MDN-Core]
+softdepend: [Vault]
+author: MineDrop Network
+description: Economy — wallets, coins, auction house, NPC merchant shops

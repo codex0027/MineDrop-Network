@@ -1,0 +1,7 @@
+name: MDN-Security
+version: ${version}
+main: ${mainClass}
+api-version: "1.21"
+depend: [MDN-Bridge, MDN-Core]
+author: MineDrop Network
+description: Enterprise security — anti-bot, anti-VPN, anti-exploit, gameplay guards

@@ -9,6 +9,7 @@ import net.minedrop.core.redis.RedisManager;
 import net.minedrop.core.sync.DataSyncEngine;
 import net.minedrop.core.sync.InventorySyncManager;
 import net.minedrop.core.util.CircuitBreaker;
+import net.minedrop.core.util.DeadLetterQueue;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandSender;
 import org.bukkit.entity.Player;
@@ -44,6 +45,7 @@ public final class CorePaperPlugin extends JavaPlugin implements Listener {
     // ── Resilience ──
     private CircuitBreaker dbCircuitBreaker;
     private CircuitBreaker redisCircuitBreaker;
+    private DeadLetterQueue deadLetterQueue;
 
     private int heartbeatTaskId = -1;
 
@@ -87,7 +89,14 @@ public final class CorePaperPlugin extends JavaPlugin implements Listener {
         MDNAPI.initialize(databaseManager.getDataSource(), redisManager.getJedisPool());
         getLogger().info("MDN-API initialized (instance: " + MDNAPI.getInstance().getInstanceId() + ")");
 
-        // ── Step 7: Initialize subsystems ──
+        // ── Step 7: Initialize Dead Letter Queue ──
+        deadLetterQueue = new DeadLetterQueue(redisManager, rawJson -> {
+            // Retry handler: re-dispatch through the packet dispatcher
+            packetDispatcher.dispatch(rawJson);
+        });
+        packetDispatcher.setDeadLetterQueue(deadLetterQueue);
+
+        // ── Step 8: Initialize subsystems ──
         playerCache = new PlayerCache(redisManager);
         inventorySyncManager = new InventorySyncManager();
         dataSyncEngine = new DataSyncEngine(redisManager, inventorySyncManager);
@@ -119,6 +128,7 @@ public final class CorePaperPlugin extends JavaPlugin implements Listener {
             getServer().getScheduler().cancelTask(heartbeatTaskId);
         }
 
+        if (deadLetterQueue != null) deadLetterQueue.shutdown();
         if (dataSyncEngine != null) dataSyncEngine.shutdown();
         if (playerCache != null) playerCache.shutdown();
         MDNAPI.shutdown();
@@ -343,6 +353,8 @@ public final class CorePaperPlugin extends JavaPlugin implements Listener {
                 + " §7[CB: " + dbCircuitBreaker.getState() + "]");
         sender.sendMessage("§7  Redis: " + statusIcon(redisManager.isConnected())
                 + " §7[CB: " + redisCircuitBreaker.getState() + "]");
+        sender.sendMessage("§7  DLQ: " + deadLetterQueue.getPendingCount()
+                + " pending, " + deadLetterQueue.getPermanentCount() + " permanent");
         sender.sendMessage("§7  MDN-API: " + statusIcon(MDNAPI.isInitialized())
                 + " §7v" + ApiVersion.CURRENT);
     }
@@ -355,6 +367,8 @@ public final class CorePaperPlugin extends JavaPlugin implements Listener {
                 + " | Circuit: " + dbCircuitBreaker.getState());
         sender.sendMessage("§7  Redis: " + redisManager.isConnected()
                 + " | Circuit: " + redisCircuitBreaker.getState());
+        sender.sendMessage("§7  DLQ: " + deadLetterQueue.getPendingCount()
+                + " pending / " + deadLetterQueue.getPermanentCount() + " permanent");
         sender.sendMessage("§7  TPS: " + String.format("%.1f", getServer().getTPS()[0]));
         sender.sendMessage("§7  Players: " + getServer().getOnlinePlayers().size()
                 + "/" + getServer().getMaxPlayers());
@@ -375,4 +389,5 @@ public final class CorePaperPlugin extends JavaPlugin implements Listener {
     public PacketDispatcher getPacketDispatcher() { return packetDispatcher; }
     public CircuitBreaker getDbCircuitBreaker() { return dbCircuitBreaker; }
     public CircuitBreaker getRedisCircuitBreaker() { return redisCircuitBreaker; }
+    public DeadLetterQueue getDeadLetterQueue() { return deadLetterQueue; }
 }

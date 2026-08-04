@@ -9,10 +9,7 @@ import redis.clients.jedis.JedisPubSub;
 
 import java.time.Duration;
 import java.util.Set;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
+import java.util.concurrent.*;
 import java.util.function.Consumer;
 
 /**
@@ -135,14 +132,82 @@ public final class RedisManager {
     }
 
     /**
-     * Checks connection health.
+     * Pushes a value to the head of a Redis list.
+     */
+    public void lpush(String key, String value) {
+        try (Jedis jedis = jedisPool.getResource()) {
+            jedis.lpush(key, value);
+        }
+    }
+
+    /**
+     * Pops a value from the tail of a Redis list (blocking, immediate).
+     * Returns null if the list is empty.
+     */
+    public String rpop(String key) {
+        try (Jedis jedis = jedisPool.getResource()) {
+            return jedis.rpop(key);
+        }
+    }
+
+    /**
+     * Returns the length of a Redis list.
+     */
+    public long llen(String key) {
+        try (Jedis jedis = jedisPool.getResource()) {
+            return jedis.llen(key);
+        }
+    }
+
+    /**
+     * Checks connection health with a hard timeout.
      */
     public boolean isConnected() {
-        try (Jedis jedis = jedisPool.getResource()) {
-            return "PONG".equals(jedis.ping());
+        try {
+            return CompletableFuture.supplyAsync(() -> {
+                try (Jedis jedis = jedisPool.getResource()) {
+                    return "PONG".equals(jedis.ping());
+                }
+            }).get(5, TimeUnit.SECONDS);
+        } catch (TimeoutException e) {
+            log.warn("Redis health check timed out after 5s");
+            return false;
         } catch (Exception e) {
             return false;
         }
+    }
+
+    /**
+     * Executes a Redis operation with a hard timeout.
+     * Returns null if the operation times out or fails.
+     *
+     * @param timeoutSeconds maximum seconds to wait
+     * @param operation      the Redis operation to execute
+     * @param <T>            return type
+     * @return the result, or null if timed out
+     */
+    public <T> T executeWithTimeout(int timeoutSeconds, RedisOperation<T> operation) {
+        try {
+            return CompletableFuture.supplyAsync(() -> {
+                try {
+                    return operation.execute();
+                } catch (Exception e) {
+                    throw new RuntimeException(e);
+                }
+            }).get(timeoutSeconds, TimeUnit.SECONDS);
+        } catch (TimeoutException e) {
+            log.error("Redis operation timed out after {}s", timeoutSeconds);
+            return null;
+        } catch (Exception e) {
+            log.error("Redis operation failed", e);
+            return null;
+        }
+    }
+
+    /** Functional interface for Redis operations. */
+    @FunctionalInterface
+    public interface RedisOperation<T> {
+        T execute() throws Exception;
     }
 
     public JedisPool getJedisPool() {

@@ -4,6 +4,8 @@ import net.minedrop.api.packet.MDNPacket;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import net.minedrop.core.util.DeadLetterQueue;
+
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Consumer;
@@ -20,6 +22,7 @@ public final class PacketDispatcher {
     private static final Logger log = LoggerFactory.getLogger(PacketDispatcher.class);
 
     private final Map<String, Consumer<MDNPacket>> handlers = new ConcurrentHashMap<>();
+    private DeadLetterQueue deadLetterQueue;
 
     /**
      * Registers a handler for a specific packet type.
@@ -40,8 +43,16 @@ public final class PacketDispatcher {
     }
 
     /**
+     * Sets the dead letter queue for failed packet handling.
+     */
+    public void setDeadLetterQueue(DeadLetterQueue dlq) {
+        this.deadLetterQueue = dlq;
+    }
+
+    /**
      * Handles an incoming raw JSON message from Redis.
      * Deserializes it and dispatches to the appropriate handler.
+     * If the handler throws, the packet is enqueued to the Dead Letter Queue.
      *
      * @param rawJson the raw JSON string from Redis Pub/Sub
      */
@@ -64,10 +75,23 @@ public final class PacketDispatcher {
 
             // Full deserialization via MDNPacket's polymorphic mapper
             MDNPacket packet = MDNPacket.deserialize(rawJson);
-            handler.accept(packet);
+
+            // Try to handle — if it throws, push to DLQ
+            try {
+                handler.accept(packet);
+            } catch (Exception handlerError) {
+                log.error("Handler for '{}' threw — enqueuing to DLQ", packetType, handlerError);
+                if (deadLetterQueue != null) {
+                    deadLetterQueue.enqueue(rawJson, handlerError);
+                }
+            }
 
         } catch (Exception e) {
-            log.error("Failed to dispatch packet: {}", truncate(rawJson), e);
+            log.error("Failed to deserialize packet: {}", truncate(rawJson), e);
+            // If we can't even deserialize, enqueue the raw JSON for manual inspection
+            if (deadLetterQueue != null) {
+                deadLetterQueue.enqueue(rawJson, e);
+            }
         }
     }
 

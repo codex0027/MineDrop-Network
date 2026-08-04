@@ -9,6 +9,9 @@ import org.slf4j.LoggerFactory;
 import java.sql.Connection;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 /**
  * Manages the MySQL connection pool via HikariCP.
@@ -75,14 +78,56 @@ public final class DatabaseManager {
     }
 
     /**
-     * Attempts a test query to verify connectivity.
+     * Attempts a test query with a hard timeout to verify connectivity.
      */
     public boolean isConnected() {
-        try (Connection conn = dataSource.getConnection()) {
-            return conn.isValid(3);
-        } catch (SQLException e) {
+        try {
+            return CompletableFuture.supplyAsync(() -> {
+                try (Connection conn = dataSource.getConnection()) {
+                    return conn.isValid(3);
+                } catch (SQLException e) {
+                    return false;
+                }
+            }).get(10, TimeUnit.SECONDS);
+        } catch (TimeoutException e) {
+            log.warn("Database health check timed out after 10s");
+            return false;
+        } catch (Exception e) {
             return false;
         }
+    }
+
+    /**
+     * Executes a database operation with a hard timeout.
+     * Returns null if the operation times out or fails.
+     *
+     * @param timeoutSeconds maximum seconds to wait
+     * @param operation      the SQL operation to execute
+     * @param <T>            return type
+     * @return the result, or null if timed out
+     */
+    public <T> T executeWithTimeout(int timeoutSeconds, DBOperation<T> operation) {
+        try {
+            return CompletableFuture.supplyAsync(() -> {
+                try {
+                    return operation.execute();
+                } catch (SQLException e) {
+                    throw new RuntimeException(e);
+                }
+            }).get(timeoutSeconds, TimeUnit.SECONDS);
+        } catch (TimeoutException e) {
+            log.error("Database operation timed out after {}s", timeoutSeconds);
+            return null;
+        } catch (Exception e) {
+            log.error("Database operation failed", e);
+            return null;
+        }
+    }
+
+    /** Functional interface for database operations that may throw SQLException. */
+    @FunctionalInterface
+    public interface DBOperation<T> {
+        T execute() throws SQLException;
     }
 
     public void shutdown() {

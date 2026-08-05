@@ -1,7 +1,7 @@
 # MineDrop Network — Development Timeline
 
 > **Purpose**: Visual roadmap of everything we've built, are building, and will build.  
-> **Last Updated**: August 5, 2026 — cross-server handshake + signature verification
+> **Last Updated**: August 5, 2026 — handshake race fix + signature hash fix
 
 ---
 
@@ -16,7 +16,7 @@ Foundation →  Startup Fix →  JSON+Config →  Handshake+Signature
     ✅ Done       ✅ Done         ✅ Done        ✅ Done
 
                                                                               ▼
-                                                                     [Phase 10] ───► [Phase 11]
+                                                                     [Phase 11] ───► [Phase 12]
                                                                       Planned         Dreams
 ```
 
@@ -174,6 +174,23 @@ Status: ✅ Complete Phase 4
 
 ---
 
+### Phase 10 — Handshake Race Fix & Signature Hash Fix
+**Duration**: ~1 hour  
+**Date**: August 5, 2026  
+**Commit**: `de86137` (4 files, +79/-26)
+
+```
+Fixes:
+  ✅ Handshake race fixed           (2s initial delay → SUCCESS on attempt 1)
+  ✅ Signature hash matching fixed  (sorted-entry hashing + Python ZIP_STORED injection)
+  ✅ MDN-Core self-registration     (BridgeManager.register in onLoad)
+  ✅ Both plugins verified           (debug-mode: false, real hashes — both passed)
+
+Verified on live servers: Paper 26.2 + Velocity 4.1.0
+```
+
+---
+
 ### Phase 9 — Cross-Server Handshake & Signature Verification
 **Duration**: ~2 hours  
 **Date**: August 5, 2026  
@@ -212,7 +229,7 @@ Status: ✅ Config now works on Velocity exactly like Paper
 
 ---
 
-## 🔜 Upcoming — Phase 10 (Planned)
+## 🔜 Upcoming — Phase 11 (Planned)
 
 **Target**: Next development session  
 **Focus**: Rate Limiting + Graceful Degradation
@@ -230,7 +247,7 @@ Estimated effort: 2-3 hours
 
 ---
 
-## 📋 Phase 11 — Future (Medium Term)
+## 📋 Phase 12 — Future (Medium Term)
 
 **Focus**: Monitoring + Developer Tools
 
@@ -247,7 +264,7 @@ Estimated effort: 4-6 hours
 
 ---
 
-## 🌟 Phase 12 — Dreams (Long Term)
+## 🌟 Phase 13 — Dreams (Long Term)
 
 **Focus**: Scale + High Availability
 
@@ -268,7 +285,7 @@ Estimated effort: 8-12 hours (spread across weeks)
 
 | Metric | Count |
 |--------|-------|
-| Total commits | 9 |
+| Total commits | 11 |
 | Total files created | 94 |
 | Total source lines | ~5,700 |
 | Total test lines | ~400 |
@@ -276,7 +293,7 @@ Estimated effort: 8-12 hours (spread across weeks)
 | Unit tests passing | 24/24 |
 | Plugins fully implemented | 3 (mdn-api, mdn-bridge, mdn-core) |
 | Plugins as skeletons | 7 |
-| Suggestions cataloged | 46 |
+| Suggestions cataloged | 49 |
 | Documentation pages | 8 (README + 7 docs in documents/) |
 
 ---

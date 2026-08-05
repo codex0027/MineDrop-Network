@@ -1,8 +1,8 @@
 # MineDrop Network — Development Diary
 
-> **Last Updated**: August 5, 2026 — cross-server handshake + signature verification  
-> **Build Status**: ✅ All 3 plugins compiling, 24/24 tests passing, handshake VERIFIED  
-> **Branch**: `main` | **Commit**: `ed69f5d`
+> **Last Updated**: August 5, 2026 — handshake race fix + signature hash fix  
+> **Build Status**: ✅ Both plugins signature-verified, handshake on attempt 1  
+> **Branch**: `main` | **Commit**: `de86137`
 
 > **📚 Companion Docs**: [STEPS.md](STEPS.md) (step-by-step log) · [SUGGEST.md](SUGGEST.md) (suggestions catalog) · [TIMELINE.md](TIMELINE.md) (roadmap)
 
@@ -614,6 +614,7 @@ CircuitBreakerTest (mdn-core) — 7 tests:
 | 2026-08-04 | `ae71f4f` | Duplicate velocity-plugin.json deduplication — removed manual templates, annotation processor now sole source of truth |
 | 2026-08-04 | `81da386` | Velocity config bootstrap — saveDefaultConfig() for both plugins, config-velocity.yml now copies to disk, routing.default-region path support |
 | 2026-08-05 | `ed69f5d` | Cross-server handshake via Redis Pub/Sub + build-time signature.json generation + ClassLoader conflict fix |
+| 2026-08-05 | `de86137` | Handshake race fix (2s delay → SUCCESS on attempt 1) + signature hash fix (sorted entries + Python injection) + MDN-Core self-registration |
 
 ---
 

@@ -2,7 +2,7 @@
 
 > **Purpose**: Every single change — no matter how small — is logged here chronologically.  
 > **For**: New developers onboarding, debugging "why was this done this way", and auditing changes.  
-> **Last Updated**: August 5, 2026 — cross-server handshake + signature verification
+> **Last Updated**: August 5, 2026 — handshake race fix + signature hash fix + mdn-core registration
 
 ---
 
@@ -563,6 +563,54 @@ Attempt 3 succeeds once Proxy is up. Production fix: start Proxy before Paper se
 
 ---
 
+## Phase 10 — Handshake Race Fix & Signature Hash Fix (Commit: `de86137`)
+
+### Step 10.1 — Handshake Race: 2-Second Initial Delay
+
+**Root cause**: Paper started before Velocity, so Paper's first handshake challenge
+was published before Velocity subscribed to `mdn:bridge:handshake`. The first 2 of 3
+retries were wasted waiting for a subscription that hadn't started yet.
+
+| # | Change | File | Details |
+|---|--------|------|---------|
+| 100 | Added 2s initial delay | `BridgePaperPlugin.java` | `triggerHandshake()` now schedules first attempt with 40-tick (2s) delay via `runTaskLaterAsynchronously`. This gives Velocity time to subscribe to the handshake channel before Paper publishes. |
+
+### Step 10.2 — Signature Hash: Alphabetical Entry Sorting
+
+**Root cause**: `computeJarHash()` iterated ZIP entries in their on-disk order.
+`jar uf` (used to inject signature.json) rewrites the ZIP central directory,
+changing entry order. The hash computed at build time (before injection) didn't
+match the hash computed at runtime (after injection).
+
+| # | Change | File | Details |
+|---|--------|------|---------|
+| 101 | Sorted entry hashing | `BridgeManager.java` | `computeJarHash()` now collects all entries, sorts alphabetically by name, then hashes. Order-invariant — matches any ZIP tool. |
+| 102 | Sorted entry hashing (Gradle) | `mdn-bridge/build.gradle.kts` + `mdn-core/build.gradle.kts` | `computeJarHash()` in both Gradle scripts uses same sort-then-hash algorithm. |
+| 103 | Python signature injection | `mdn-bridge/build.gradle.kts` + `mdn-core/build.gradle.kts` | Replaced `jar uf` (rewrites JAR) with `python3 -c zipfile.ZipFile(ZIP_STORED)` (preserves entries). |
+
+### Step 10.3 — MDN-Core Self-Registration
+
+**Root cause**: MDN-Core never called `BridgeManager.register()` — only MDN-Bridge
+self-registered. MDN-Core's signature was never verified because no registration happened.
+
+| # | Change | File | Details |
+|---|--------|------|---------|
+| 104 | Added BridgeManager.register() | `CorePaperPlugin.java` | `onLoad()` now calls `BridgeManager.getInstance().register("MDN-Core", this.getClass())`. MDN-Core's signature.json is now verified on startup. |
+
+### Step 10.4 — End-to-End Verification
+
+Both plugins verified with `debug-mode: false` + real `allowed-build-hashes`:
+
+```
+[MDN-Bridge] fully verified — signature valid, hash matches.
+[MDN-Bridge] passed signature verification.
+[MDN-Core] fully verified — signature valid, hash matches.
+[MDN-Core] passed signature verification.
+[MDN-Bridge] Velocity handshake SUCCESS on attempt 1
+```
+
+---
+
 ## Summary Statistics
 
 ### By Phase
@@ -578,7 +626,8 @@ Attempt 3 succeeds once Proxy is up. Production fix: start Proxy before Paper se
 | Phase 7 (Velocity JSON Dedup) | 1 | 0 | 2 | 0 |
 | Phase 8 (Velocity Config Bootstrap) | 1 | 0 | 2 | 0 |
 | Phase 9 (Handshake + Signature) | 1 | 0 | 8 | 0 |
-| **Total** | **9** | **94** | **47** | **12** |
+| Phase 10 (Race + Hash Fixes) | 1 | 0 | 5 | 0 |
+| **Total** | **10** | **94** | **52** | **12** |
 
 *Phase 2 was bundled with Phase 1 commit
 

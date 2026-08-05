@@ -2,7 +2,7 @@
 
 > **Purpose**: Every idea, suggestion, and enhancement — whether implemented, planned, or deferred — is cataloged here.  
 > **For**: Future planning, prioritizing work, and ensuring no good idea gets lost.  
-> **Last Updated**: August 5, 2026 — cross-server handshake + signature verification
+> **Last Updated**: August 5, 2026 — handshake race fix + signature hash fix
 
 ---
 
@@ -10,11 +10,11 @@
 
 | Status | Count |
 |--------|-------|
-| ✅ Implemented | 27 |
+| ✅ Implemented | 29 |
 | 🔜 Planned (Near Future) | 6 |
 | 📋 Future Consideration | 10 |
 | ❌ Rejected / Deferred | 2 |
-| **Total** | **46** |
+| **Total** | **49** |
 
 > **📋 See also**: [ISSUES.md](ISSUES.md) — 36 bugs, gaps, and code smells found during deep audit (Aug 4, 2026)
 
@@ -30,6 +30,8 @@ These suggestions have been fully implemented and are in the codebase.
 |---|-----------|--------|---------------|
 | 44 | Cross-server handshake via Redis Pub/Sub — Paper publishes challenge, Velocity computes HMAC and responds | Real server logs | `BridgePaperPlugin.java`, `BridgeVelocityPlugin.java`, `BridgeManager.java`, `CorePaperPlugin.java`, `CoreVelocityPlugin.java` (Phase 9, Steps 92-96) |
 | 45 | Build-time signature.json generation — Gradle task computes SHA-256 of JAR (skipping signature.json), injected into shadow JAR | Self | `mdn-bridge/build.gradle.kts`, `mdn-core/build.gradle.kts`, `BridgeManager.java` (Phase 9, Steps 97-98) |
+| 46 | Fix handshake race — add 2-second initial delay so Proxy subscribes before Paper challenges | Live test | `BridgePaperPlugin.java` (Phase 10, Step 100) |
+| 47 | Fix signature hash mismatch — sort ZIP entries alphabetically, inject via Python ZIP_STORED | Live test | `BridgeManager.java`, `mdn-bridge/build.gradle.kts`, `mdn-core/build.gradle.kts` (Phase 10, Steps 101-103) |
 
 ### Critical Bug Fixes
 
@@ -122,12 +124,11 @@ These are targeted for the next development session.
 
 | # | Suggestion | Priority | Effort | Why It Matters |
 |---|-----------|----------|--------|---------------|
-| 46 | **Rate Limiter** per IP/player on packet publishing | 🔥 High | Medium | Prevents one buggy plugin from DoS-ing the Redis bus |
-| 47 | **Local Event Bus** for in-process pub/sub | 🟡 Medium | Medium | Plugins can fire/listen without going through Redis |
-| 48 | **Graceful Degradation Mode** — switch to local-only when Redis is down | 🔥 High | High | Server stays playable even if Redis crashes |
-| 49 | **Database Migration Framework** — auto-run schema changes | 🟡 Medium | High | No more manual ALTER TABLE; track applied versions |
-| 50 | **Connection Pool Metrics** — expose HikariCP stats in /mdn health | 🟡 Medium | Low | Know pool exhaustion BEFORE server dies |
-| 51 | **Fix handshake startup race** — add initial delay so Proxy has time to subscribe before Paper challenges | 🟡 Medium | Low | Handshake currently takes 3 attempts due to race; fix to 1 attempt |
+| 48 | **Rate Limiter** per IP/player on packet publishing | 🔥 High | Medium | Prevents one buggy plugin from DoS-ing the Redis bus |
+| 49 | **Local Event Bus** for in-process pub/sub | 🟡 Medium | Medium | Plugins can fire/listen without going through Redis |
+| 50 | **Graceful Degradation Mode** — switch to local-only when Redis is down | 🔥 High | High | Server stays playable even if Redis crashes |
+| 51 | **Database Migration Framework** — auto-run schema changes | 🟡 Medium | High | No more manual ALTER TABLE; track applied versions |
+| 52 | **Connection Pool Metrics** — expose HikariCP stats in /mdn health | 🟡 Medium | Low | Know pool exhaustion BEFORE server dies |
 
 ---
 
@@ -137,16 +138,16 @@ Longer-term ideas — good to have but not urgent.
 
 | # | Suggestion | Priority | Effort | Notes |
 |---|-----------|----------|--------|-------|
-| 52 | **Prometheus Metrics Export** — `/metrics` endpoint | 🟢 Low | High | Grafana dashboards for the whole network |
-| 53 | **Developer Debug Kit** — `/mdn debug packets`, `/mdn debug cache` | 🟢 Low | Medium | Live packet tracing, cache peeking, Redis ping |
-| 54 | **Packet Batching** — queue packets and flush every 50ms | 🟡 Medium | Medium | Reduces Redis roundtrips at scale |
-| 55 | **Plugin Hot-Reload Safety** — clean resource cleanup on reload | 🟢 Low | Medium | Prevent thread/connection leaks on /mdn reload |
-| 56 | **Structured Logging** — JSON log format for log aggregation | 🟢 Low | Medium | ELK/Splunk integration |
-| 57 | **Multi-Region Support** — latency-based routing | 🟢 Low | High | For EU/NA/ASIA deployment |
-| 58 | **Redis Sentinel/Cluster Support** — high availability Redis | 🟢 Low | Medium | Production HA setup |
-| 59 | **MySQL Read Replicas** — separate read/write connections | 🟢 Low | Medium | Scale read-heavy operations |
-| 60 | **Webhook Notifications** — configurable webhooks for events | 🟢 Low | Low | Admins get Discord/Slack alerts for key events |
-| 61 | **Admin Dashboard API** — REST endpoints for web admin panel | 🟢 Low | High | Future web-based server management |
+| 53 | **Prometheus Metrics Export** — `/metrics` endpoint | 🟢 Low | High | Grafana dashboards for the whole network |
+| 54 | **Developer Debug Kit** — `/mdn debug packets`, `/mdn debug cache` | 🟢 Low | Medium | Live packet tracing, cache peeking, Redis ping |
+| 55 | **Packet Batching** — queue packets and flush every 50ms | 🟡 Medium | Medium | Reduces Redis roundtrips at scale |
+| 56 | **Plugin Hot-Reload Safety** — clean resource cleanup on reload | 🟢 Low | Medium | Prevent thread/connection leaks on /mdn reload |
+| 57 | **Structured Logging** — JSON log format for log aggregation | 🟢 Low | Medium | ELK/Splunk integration |
+| 58 | **Multi-Region Support** — latency-based routing | 🟢 Low | High | For EU/NA/ASIA deployment |
+| 59 | **Redis Sentinel/Cluster Support** — high availability Redis | 🟢 Low | Medium | Production HA setup |
+| 60 | **MySQL Read Replicas** — separate read/write connections | 🟢 Low | Medium | Scale read-heavy operations |
+| 61 | **Webhook Notifications** — configurable webhooks for events | 🟢 Low | Low | Admins get Discord/Slack alerts for key events |
+| 62 | **Admin Dashboard API** — REST endpoints for web admin panel | 🟢 Low | High | Future web-based server management |
 
 ---
 
@@ -156,8 +157,8 @@ Ideas considered but decided against (with reasons).
 
 | # | Suggestion | Reason |
 |---|-----------|--------|
-| 62 | **Java 25 target** | Paper 1.21.1 ecosystem is built for Java 21; Java 25 is too new and Gradle tooling doesn't fully support it yet |
-| 63 | **Separate repos per plugin** | Would require cross-repo version sync and complex build orchestration. Monorepo keeps everything atomic |
+| 63 | **Java 25 target** | Paper 1.21.1 ecosystem is built for Java 21; Java 25 is too new and Gradle tooling doesn't fully support it yet |
+| 64 | **Separate repos per plugin** | Would require cross-repo version sync and complex build orchestration. Monorepo keeps everything atomic |
 
 ---
 
@@ -179,4 +180,4 @@ Ideas considered but decided against (with reasons).
 
 ---
 
-*Last updated: August 5, 2026 — 46 suggestions cataloged*
+*Last updated: August 5, 2026 — 49 suggestions cataloged*

@@ -54,6 +54,8 @@ public final class CorePaperPlugin extends JavaPlugin implements Listener {
     @Override
     public void onLoad() {
         getLogger().info("MDN-Core Paper loading...");
+        // Register with BridgeManager for signature verification
+        BridgeManager.getInstance().register("MDN-Core", this.getClass());
     }
 
     @Override

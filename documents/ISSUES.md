@@ -3,7 +3,7 @@
 > **Purpose**: Every issue, bug, gap, code smell, and improvement opportunity found during deep analysis.  
 > **Status**: ✅ **ALL 36 ISSUES + 1 BUILD ISSUE FIXED** — August 4, 2026  
 > **Last Deep Audit**: August 5, 2026  
-> **Last Fix**: August 5, 2026 — cross-server handshake + signature verification
+> **Last Fix**: August 5, 2026 — handshake race + signature hash + mdn-core registration
 > **Files Audited**: 30 source files across mdn-api, mdn-bridge, mdn-core
 
 ---
@@ -13,10 +13,10 @@
 | Severity | Count | Fixed | Outstanding |
 |----------|-------|-------|-------------|
 | 🔴 Critical | 4 | 4 ✅ | 0 |
-| 🟠 High | 14 | 14 ✅ | 0 |
-| 🟡 Medium | 14 | 14 ✅ | 0 |
+| 🟠 High | 15 | 15 ✅ | 0 |
+| 🟡 Medium | 15 | 15 ✅ | 0 |
 | 🟢 Low | 7 | 7 ✅ | 0 |
-| **Total** | **40** | **40** | **0** |
+| **Total** | **42** | **42** | **0** |
 
 ### Additional Build Issues (Post-Audit)
 
@@ -29,6 +29,8 @@
 
 | B-3 | 🔴 | ClassCastException: BridgePaperPlugin cannot be cast to BridgePaperPlugin | mdn-core shadowJar bundled `net/minedrop/bridge/**` classes. Paper creates separate ClassLoaders per JAR → same class loaded twice → incompatible types. Added `exclude("net/minedrop/bridge/**")` to mdn-core's shadowJar. mdn-core now uses BridgeManager from mdn-bridge's JAR at runtime. |
 | B-4 | 🟠 | Handshake always timed out — challenge never published to Redis | BridgePaperPlugin created a CompletableFuture but nobody completed it. Implemented full Redis Pub/Sub flow: Paper publishes challenge → Velocity subscribes, computes HMAC, publishes response → Paper validates. HandshakeTransport interface avoids circular dependency. |
+| B-5 | 🟠 | Handshake takes 3 attempts (first 2 lost) — Paper starts before Velocity subscribes | Added 2-second initial delay via `runTaskLaterAsynchronously(40L)` in `BridgePaperPlugin.triggerHandshake()`. Now SUCCESS on attempt 1. |
+| B-6 | 🟡 | Signature hash computed on original jar but verified on shadow jar — hash mismatch | Changed `computeJarHash()` to sort entries alphabetically (order-invariant). Changed signature injection from `jar uf` (rewrites JAR) to Python `zipfile.ZipFile(ZIP_STORED)` (preserves entries). Added `BridgeManager.register()` call in `CorePaperPlugin.onLoad()`. Both plugins now verify correctly. |
 
 ### Resolution Table
 

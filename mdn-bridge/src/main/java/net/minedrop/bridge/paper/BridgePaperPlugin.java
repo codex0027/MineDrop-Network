@@ -87,8 +87,12 @@ public final class BridgePaperPlugin extends JavaPlugin {
      * so Redis isn't ready when Bridge first tries the handshake.
      */
     public void triggerHandshake() {
-        getLogger().info("Redis transport ready — initiating Velocity handshake (retries: 3)...");
-        attemptHandshakeAsync(1);
+        // 2-second delay gives Velocity time to subscribe to mdn:bridge:handshake
+        // before Paper publishes the first challenge. Without this delay, the first
+        // 1-2 attempts are lost because Velocity's listener isn't active yet.
+        getLogger().info("Redis transport ready — initiating Velocity handshake in 2s...");
+        Bukkit.getScheduler().runTaskLaterAsynchronously(this,
+                () -> attemptHandshakeAsync(1), 40L); // 40 ticks = 2 seconds
     }
 
     @Override

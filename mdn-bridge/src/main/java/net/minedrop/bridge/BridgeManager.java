@@ -347,31 +347,39 @@ public final class BridgeManager {
     /**
      * Computes the SHA-256 hex hash of the JAR file, skipping signature.json.
      * <p>
-     * We iterate the ZIP entries in order and hash their contents — but explicitly
-     * skip {@code signature.json}. This solves the chicken-and-egg problem:
-     * the build-time hash cannot include the signature file that contains the hash.
+     * Entries are collected, sorted alphabetically by name, then hashed.
+     * This makes the hash invariant to ZIP entry order (which changes when
+     * signature.json is injected via jar uf at build time).
      * <p>
      * The Gradle task {@code generateSignature} computes the hash the same way,
      * so the hash embedded in signature.json matches what this method produces.
      */
     private String computeJarHash(Path jarPath) {
         try (ZipInputStream zis = new ZipInputStream(Files.newInputStream(jarPath))) {
-            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            // Collect entries, skipping signature.json
+            record JarEntry(String name, byte[] data) {}
+            List<JarEntry> entries = new ArrayList<>();
             ZipEntry entry;
             while ((entry = zis.getNextEntry()) != null) {
                 if (entry.isDirectory()) continue;
                 if ("signature.json".equals(entry.getName())) continue;
-
-                // Hash the entry name (for deterministic ordering across builds)
-                digest.update(entry.getName().getBytes(StandardCharsets.UTF_8));
-
-                // Hash the entry contents
+                ByteArrayOutputStream bos = new ByteArrayOutputStream();
                 byte[] buf = new byte[8192];
                 int len;
                 while ((len = zis.read(buf)) > 0) {
-                    digest.update(buf, 0, len);
+                    bos.write(buf, 0, len);
                 }
                 zis.closeEntry();
+                entries.add(new JarEntry(entry.getName(), bos.toByteArray()));
+            }
+
+            // Sort alphabetically for deterministic hashing
+            entries.sort(Comparator.comparing(JarEntry::name));
+
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            for (JarEntry je : entries) {
+                digest.update(je.name().getBytes(StandardCharsets.UTF_8));
+                digest.update(je.data());
             }
 
             byte[] hash = digest.digest();

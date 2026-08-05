@@ -2,6 +2,7 @@
 // MDN-Core — Network Heartbeat (Velocity + Paper)
 // =============================================================================
 
+import java.io.ByteArrayOutputStream
 import java.io.File
 import java.security.MessageDigest
 import java.util.zip.ZipInputStream
@@ -89,35 +90,53 @@ tasks.processResources {
 }
 
 // ── Build-time signature.json generation ──
-// Computes SHA-256 of the JAR (skipping signature.json) for runtime verification.
+// Computes SHA-256 of the SHADOW JAR (skipping signature.json) for runtime verification.
 val generateSignature by tasks.registering {
-    dependsOn(tasks.jar)
+    dependsOn(tasks.shadowJar)
     doLast {
+        val shadowJarFile = tasks.shadowJar.get().archiveFile.get().asFile
+        val hash = computeJarHash(shadowJarFile)
         val sigFile = layout.buildDirectory.file("generated/signature/signature.json").get().asFile
         sigFile.parentFile.mkdirs()
-        val jarFile = tasks.jar.get().archiveFile.get().asFile
-        val hash = computeJarHash(jarFile)
         val json = """{"plugin_id":"mdn-core","version":"${project.version}","build_hash":"$hash","timestamp":${System.currentTimeMillis()},"gradle_build":"${project.name}"}"""
         sigFile.writeText(json)
+        // Inject signature.json using Python to preserve ZIP entry order
+        project.exec {
+            commandLine("python3", "-c", """
+import zipfile, os
+sig = '${sigFile.absolutePath}'
+jar = '${shadowJarFile.absolutePath}'
+with zipfile.ZipFile(jar, 'a', zipfile.ZIP_STORED) as zf:
+    zf.writestr('signature.json', open(sig).read())
+""".trimIndent())
+        }
         println("  [signature] mdn-core: $hash")
     }
 }
-tasks.shadowJar { dependsOn(generateSignature); from(layout.buildDirectory.dir("generated/signature")) }
+tasks.build { dependsOn(generateSignature) }
 
 // Hashes JAR by iterating ZIP entries, skipping signature.json (matches BridgeManager.computeJarHash)
+// Entries are sorted alphabetically to make the hash invariant to ZIP entry order.
 fun computeJarHash(jar: File): String {
     val digest = MessageDigest.getInstance("SHA-256")
+    val entries = mutableListOf<Pair<String, ByteArray>>()
     ZipInputStream(jar.inputStream()).use { zis ->
         while (true) {
             val entry = zis.nextEntry ?: break
             if (entry.isDirectory) continue
             if (entry.name == "signature.json") continue
-            digest.update(entry.name.toByteArray(Charsets.UTF_8))
+            val bos = ByteArrayOutputStream()
             val buf = ByteArray(8192)
             var len: Int
-            while (zis.read(buf).also { len = it } > 0) digest.update(buf, 0, len)
+            while (zis.read(buf).also { len = it } > 0) bos.write(buf, 0, len)
             zis.closeEntry()
+            entries.add(entry.name to bos.toByteArray())
         }
+    }
+    entries.sortBy { it.first }
+    for ((name, data) in entries) {
+        digest.update(name.toByteArray(Charsets.UTF_8))
+        digest.update(data)
     }
     return digest.digest().joinToString("") { "%02x".format(it) }
 }

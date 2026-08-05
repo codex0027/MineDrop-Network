@@ -2,7 +2,7 @@
 
 > **Purpose**: Every single change — no matter how small — is logged here chronologically.  
 > **For**: New developers onboarding, debugging "why was this done this way", and auditing changes.  
-> **Last Updated**: August 4, 2026 (night — Velocity config bootstrap fix)
+> **Last Updated**: August 5, 2026 — cross-server handshake + signature verification
 
 ---
 
@@ -484,6 +484,85 @@ Velocity onProxyInitialize()
 
 ---
 
+## Phase 9 — Cross-Server Handshake & Signature Verification (Commit: `ed69f5d`)
+
+### Step 9.1 — Cross-Server Handshake via Redis Pub/Sub
+
+**Root cause**: The handshake was designed but never implemented end-to-end.
+BridgePaperPlugin's `performCrossServerHandshake()` created a CompletableFuture but
+nobody completed it — the challenge was generated but never published to Redis,
+and Velocity never subscribed to respond. The handshake always timed out.
+
+**Design**: Challenge-response via Redis Pub/Sub channels:
+- Paper publishes challenge JSON to `mdn:bridge:handshake`
+- Velocity subscribes, computes HMAC-SHA256 with secret-api-key, publishes response to `mdn:bridge:handshake:response`
+- Paper validates HMAC — if correct, session token is established
+
+**Timing problem solved**: BridgePaperPlugin.onEnable() runs BEFORE CorePaperPlugin.onEnable(),
+so Redis isn't ready when Bridge first attempts the handshake. Fixed by:
+- Bridge defers handshake until Core injects the transport
+- CorePaperPlugin triggers `bridgePlugin.triggerHandshake()` after setting HandshakeTransport
+- CoreVelocityPlugin triggers `BridgeVelocityPlugin.triggerHandshakeListener()` similarly
+
+| # | Change | File | Details |
+|---|--------|------|---------|
+| 92 | HandshakeTransport interface | `BridgeManager.java` | Avoids circular dependency: mdn-bridge can't import mdn-core's RedisManager. Transport has publish/subscribe/isConnected methods. Core injects implementation. |
+| 93 | Real cross-server handshake | `BridgePaperPlugin.java` | Publishes challenge JSON to Redis, subscribes to response channel, waits for Velocity's HMAC response, validates. Triggered by Core after transport ready. |
+| 94 | Handshake responder | `BridgeVelocityPlugin.java` | Subscribes to `mdn:bridge:handshake`, parses challenge, computes HMAC, publishes response to `mdn:bridge:handshake:response`. Static `triggerHandshakeListener()` called by Core. |
+| 95 | Transport injection (Paper) | `CorePaperPlugin.java` | Creates HandshakeTransport wrapping RedisManager, calls `bridgeManager.setHandshakeTransport()`, then triggers `bridgePlugin.triggerHandshake()`. |
+| 96 | Transport injection (Velocity) | `CoreVelocityPlugin.java` | Same pattern — injects transport then calls `BridgeVelocityPlugin.triggerHandshakeListener()`. |
+
+### Step 9.2 — Build-Time signature.json Generation
+
+**Root cause**: `BridgeManager.verifyPluginSignature()` looks for `signature.json` in the JAR,
+but nothing generated it. In debug mode this is bypassed, but production needs real signatures.
+
+The chicken-and-egg problem: you can't hash the JAR and embed that hash in the JAR
+because embedding changes the bytes and invalidates the hash.
+
+**Solution**:
+- Gradle `generateSignature` task runs after `jar`, computes SHA-256 of JAR contents
+  by iterating ZIP entries while **skipping signature.json**
+- Writes `signature.json` to `build/generated/signature/`
+- `shadowJar` picks it up via `from()`
+- `BridgeManager.computeJarHash()` mirrors the same algorithm at runtime:
+  iterates ZIP entries, skips signature.json, hashes the rest
+- Both produce identical hashes → verification succeeds
+
+| # | Change | File | Details |
+|---|--------|------|---------|
+| 97 | generateSignature task | `mdn-bridge/build.gradle.kts` + `mdn-core/build.gradle.kts` | Custom Gradle task: reads JAR via ZipInputStream, hashes entries in order (skipping signature.json), writes JSON with plugin_id, version, build_hash, timestamp. |
+| 98 | Fixed computeJarHash() | `BridgeManager.java` | Changed from `Files.readAllBytes(jarPath)` to ZIP entry iteration, skipping signature.json — matches build-time hash exactly. |
+
+### Step 9.3 — ClassLoader Conflict Fix
+
+**Root cause**: Both mdn-bridge.jar and mdn-core.jar bundled `net/minedrop/bridge/**` classes.
+Paper creates separate ClassLoaders per JAR → `BridgePaperPlugin.class` loaded twice →
+`ClassCastException: BridgePaperPlugin cannot be cast to BridgePaperPlugin`.
+
+| # | Change | File | Details |
+|---|--------|------|---------|
+| 99 | Exclude bridge from core | `mdn-core/build.gradle.kts` | Added `exclude("net/minedrop/bridge/**")` to shadowJar. mdn-core uses BridgeManager from mdn-bridge's JAR at runtime via plugin dependency. |
+
+### Step 9.4 — Handshake End-to-End Verification
+
+Tested on live servers (Paper 26.2 + Velocity 4.1.0):
+
+```
+Lobby (Paper):
+  [10:48:45] Handshake VERIFIED — session established with Velocity
+  [10:48:45] Velocity handshake SUCCESS on attempt 3
+
+Proxy (Velocity):
+  [10:48:45] Received handshake challenge from paper-lobby-01: 26accd25...
+  [10:48:45] Handshake response published for server: paper-lobby-01
+```
+
+Known race: Lobby starts before Proxy → first 2 attempts lost (Proxy not subscribed yet).
+Attempt 3 succeeds once Proxy is up. Production fix: start Proxy before Paper servers.
+
+---
+
 ## Summary Statistics
 
 ### By Phase
@@ -498,7 +577,8 @@ Velocity onProxyInitialize()
 | Phase 6 (Redis + Shadow Fix) | 1 | 0 | 4 | 0 |
 | Phase 7 (Velocity JSON Dedup) | 1 | 0 | 2 | 0 |
 | Phase 8 (Velocity Config Bootstrap) | 1 | 0 | 2 | 0 |
-| **Total** | **7** | **94** | **39** | **12** |
+| Phase 9 (Handshake + Signature) | 1 | 0 | 8 | 0 |
+| **Total** | **9** | **94** | **47** | **12** |
 
 *Phase 2 was bundled with Phase 1 commit
 

@@ -2,8 +2,8 @@
 
 > **Purpose**: Every issue, bug, gap, code smell, and improvement opportunity found during deep analysis.  
 > **Status**: ✅ **ALL 36 ISSUES + 1 BUILD ISSUE FIXED** — August 4, 2026  
-> **Last Deep Audit**: August 4, 2026  
-> **Last Fix**: August 4, 2026 (night) — Velocity config bootstrap fix
+> **Last Deep Audit**: August 5, 2026  
+> **Last Fix**: August 5, 2026 — cross-server handshake + signature verification
 > **Files Audited**: 30 source files across mdn-api, mdn-bridge, mdn-core
 
 ---
@@ -12,18 +12,23 @@
 
 | Severity | Count | Fixed | Outstanding |
 |----------|-------|-------|-------------|
-| 🔴 Critical | 3 | 3 ✅ | 0 |
-| 🟠 High | 12 | 12 ✅ | 0 |
+| 🔴 Critical | 4 | 4 ✅ | 0 |
+| 🟠 High | 14 | 14 ✅ | 0 |
 | 🟡 Medium | 14 | 14 ✅ | 0 |
 | 🟢 Low | 7 | 7 ✅ | 0 |
-| **Total** | **38** | **38** | **0** |
+| **Total** | **40** | **40** | **0** |
 
 ### Additional Build Issues (Post-Audit)
 
 | ID | Severity | Issue | Fix |
 |----|----------|-------|-----|
-| B-1 | 🟠 | Shadow JAR contains TWO copies of velocity-plugin.json | Deleted manual templates in `src/main/resources/`; Velocity @Plugin annotation processor is now sole source of truth. Removed `filesMatching("velocity-plugin.json")` expand blocks from both build.gradle.kts. |
-| B-2 | 🟠 | Velocity plugins never create data dirs or copy default config | Added `saveDefaultConfig()` to both `BridgeVelocityPlugin` and `CoreVelocityPlugin` — creates `plugins/mdn-*/`, copies `config-velocity.yml` from JAR → `config.yml`. Core loader now reads `routing.default-region` alongside `network.default-region`. |
+| B-1 | 🟠 | Shadow JAR contains TWO copies of velocity-plugin.json | Deleted manual templates; Velocity @Plugin annotation processor is now sole source of truth. Removed expand blocks from both build.gradle.kts. |
+| B-2 | 🟠 | Velocity config never created on first startup | Added `saveDefaultConfig()` to both Velocity plugins. |
+| B-3 | 🔴 | ClassCastException: BridgePaperPlugin cannot be cast to BridgePaperPlugin | mdn-core shadowJar excluded `net/minedrop/bridge/**`. |
+| B-4 | 🟠 | Handshake always timed out — challenge never published | Implemented full Redis Pub/Sub challenge-response flow. |
+
+| B-3 | 🔴 | ClassCastException: BridgePaperPlugin cannot be cast to BridgePaperPlugin | mdn-core shadowJar bundled `net/minedrop/bridge/**` classes. Paper creates separate ClassLoaders per JAR → same class loaded twice → incompatible types. Added `exclude("net/minedrop/bridge/**")` to mdn-core's shadowJar. mdn-core now uses BridgeManager from mdn-bridge's JAR at runtime. |
+| B-4 | 🟠 | Handshake always timed out — challenge never published to Redis | BridgePaperPlugin created a CompletableFuture but nobody completed it. Implemented full Redis Pub/Sub flow: Paper publishes challenge → Velocity subscribes, computes HMAC, publishes response → Paper validates. HandshakeTransport interface avoids circular dependency. |
 
 ### Resolution Table
 
@@ -100,5 +105,5 @@ mdn-bridge/src/main/java/net/minedrop/bridge/velocity/BridgeVelocityPlugin.java 
 
 ---
 
-*Audit completed August 4, 2026. 30 files analyzed. 36 issues found + 2 build issues. 38 fixed.*  
-*Build: ✅ All 3 plugins compile + test — zero failures.*
+*Audit completed August 5, 2026. 30 files analyzed. 36 issues found + 4 build issues. 40 fixed.*  
+*Build: ✅ All 3 plugins compile + test — zero failures. Handshake verified end-to-end.*

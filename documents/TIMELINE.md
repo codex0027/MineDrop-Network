@@ -1,22 +1,22 @@
 # MineDrop Network — Development Timeline
 
 > **Purpose**: Visual roadmap of everything we've built, are building, and will build.  
-> **Last Updated**: August 4, 2026 (night — Velocity config bootstrap fix)
+> **Last Updated**: August 5, 2026 — cross-server handshake + signature verification
 
 ---
 
 ## 🗓️ Timeline Overview
 
 ```
-2026-08-04 ────────────────────────────────────────────────────────────────► Future
+2026-08-04 ───────────────────────────────────────────────────────► 2026-08-05 ──► Future
 
-[Phase 0]    [Phase 1]        [Phase 2]         [Phase 3]          [Phase 4]   [Phase 5]    [Phase 6]         [Phase 7]      [Phase 8]
-Analysis  →  Founda... →  Resilience  →  DLQ+Doc  →  Startup Fix  →  Redis+JAR  →  JSON Dedup  →  Config Bootstrap
- (30 min)     (3 hours)       (2 hours)      (1.5h)    (1 hour)        (1.5h)        (20 min)        (30 min)
-              ✅ Done     ✅ Done       ✅ Done      ✅ Done         ✅ Done        ✅ Done          ✅ Done
+[Phase 0-4]   [Phase 5-6]    [Phase 7-8]        [Phase 9]
+Foundation →  Startup Fix →  JSON+Config →  Handshake+Signature
+ (6.5 hours)   (2.5 hours)     (50 min)      (2 hours)
+    ✅ Done       ✅ Done         ✅ Done        ✅ Done
 
                                                                               ▼
-                                                                     [Phase 9] ────► [Phase 10]
+                                                                     [Phase 10] ───► [Phase 11]
                                                                       Planned         Dreams
 ```
 
@@ -174,7 +174,27 @@ Status: ✅ Complete Phase 4
 
 ---
 
-### Phase 8 — Velocity Config Bootstrap Fix
+### Phase 9 — Cross-Server Handshake & Signature Verification
+**Duration**: ~2 hours  
+**Date**: August 5, 2026  
+**Commit**: `ed69f5d` (8 files, +377/-30)
+
+```
+Major features:
+  ✅ Cross-server handshake       (Redis Pub/Sub: Paper challenge → Velocity HMAC → Paper validate)
+  ✅ HandshakeTransport interface (avoids circular mdn-bridge → mdn-core dependency)
+  ✅ Build-time signature.json    (Gradle generateSignature task, ZIP entry hash skipping signature)
+  ✅ computeJarHash() fixed       (Now mirrors build-time hash — skips signature.json in ZIP)
+  ✅ ClassLoader conflict fixed   (mdn-core shadowJar excludes net/minedrop/bridge/**)
+  ✅ End-to-end tested            (Paper 26.2 + Velocity 4.1.0 — handshake VERIFIED)
+
+Handshake flow: Paper → Redis(mdn:bridge:handshake) → Velocity → HMAC → Redis(mdn:bridge:handshake:response) → Paper
+Status: ✅ Production-ready — session token established
+```
+
+---
+
+### Phase 8 — Velocity Config Bootstrap Fix (Previous)
 **Duration**: ~30 minutes  
 **Date**: August 4, 2026 (night)  
 **Commit**: `81da386` (2 files, 89 insertions, 5 deletions)
@@ -192,7 +212,7 @@ Status: ✅ Config now works on Velocity exactly like Paper
 
 ---
 
-## 🔜 Upcoming — Phase 9 (Planned)
+## 🔜 Upcoming — Phase 10 (Planned)
 
 **Target**: Next development session  
 **Focus**: Rate Limiting + Graceful Degradation
@@ -210,7 +230,7 @@ Estimated effort: 2-3 hours
 
 ---
 
-## 📋 Phase 10 — Future (Medium Term)
+## 📋 Phase 11 — Future (Medium Term)
 
 **Focus**: Monitoring + Developer Tools
 
@@ -227,7 +247,7 @@ Estimated effort: 4-6 hours
 
 ---
 
-## 🌟 Phase 11 — Dreams (Long Term)
+## 🌟 Phase 12 — Dreams (Long Term)
 
 **Focus**: Scale + High Availability
 
@@ -248,7 +268,7 @@ Estimated effort: 8-12 hours (spread across weeks)
 
 | Metric | Count |
 |--------|-------|
-| Total commits | 7 |
+| Total commits | 9 |
 | Total files created | 94 |
 | Total source lines | ~5,700 |
 | Total test lines | ~400 |
@@ -256,8 +276,8 @@ Estimated effort: 8-12 hours (spread across weeks)
 | Unit tests passing | 24/24 |
 | Plugins fully implemented | 3 (mdn-api, mdn-bridge, mdn-core) |
 | Plugins as skeletons | 7 |
-| Suggestions cataloged | 41 |
-| Documentation pages | 8 (README, DIARY, STEPS, SUGGEST, TIMELINE, DEPLOY, FIX-GUIDE, ISSUES) |
+| Suggestions cataloged | 46 |
+| Documentation pages | 8 (README + 7 docs in documents/) |
 
 ---
 

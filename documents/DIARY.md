@@ -1,8 +1,8 @@
 # MineDrop Network — Development Diary
 
-> **Last Updated**: August 4, 2026 (night — Velocity config bootstrap fix)  
-> **Build Status**: ✅ All 3 plugins compiling, 24/24 tests passing  
-> **Branch**: `main` | **Commit**: `81da386`
+> **Last Updated**: August 5, 2026 — cross-server handshake + signature verification  
+> **Build Status**: ✅ All 3 plugins compiling, 24/24 tests passing, handshake VERIFIED  
+> **Branch**: `main` | **Commit**: `ed69f5d`
 
 > **📚 Companion Docs**: [STEPS.md](STEPS.md) (step-by-step log) · [SUGGEST.md](SUGGEST.md) (suggestions catalog) · [TIMELINE.md](TIMELINE.md) (roadmap)
 
@@ -17,13 +17,15 @@
 5. [Round 2 — Production Hardening](#round-2--production-hardening)
 6. [Round 3 — Resilience & Observability](#round-3--resilience--observability)
 7. [Round 4 — Dead Letter Queue & Operation Timeouts](#round-4--dead-letter-queue--operation-timeouts)
-8. [File Map — Every File Explained](#file-map--every-file-explained)
+8. [Round 5 — Velocity Config Bootstrap Fix](#round-5--velocity-config-bootstrap-fix)
+9. [Round 6 — Cross-Server Handshake & Signature Verification](#round-6--cross-server-handshake--signature-verification)
+10. [File Map — Every File Explained](#file-map--every-file-explained)
 9. [How to Build](#how-to-build)
 10. [How to Add a New Plugin](#how-to-add-a-new-plugin)
 11. [How to Add a New Feature](#how-to-add-a-new-feature)
-12. [Test Coverage](#test-coverage)
-13. [Known Gaps & Future Work](#known-gaps--future-work)
-14. [Conventions & Style Guide](#conventions--style-guide)
+14. [Test Coverage](#test-coverage)
+15. [Known Gaps & Future Work](#known-gaps--future-work)
+16. [Conventions & Style Guide](#conventions--style-guide)
 
 ---
 
@@ -315,6 +317,26 @@ Added `saveDefaultConfig()` methods to both Velocity plugins:
 
 ---
 
+## Round 6 — Cross-Server Handshake & Signature Verification
+
+**Commit**: `ed69f5d`  
+**Date**: August 5, 2026  
+**What was built**: End-to-end Redis-based handshake + build-time signature generation
+
+### Cross-Server Handshake
+- **Flow**: Paper publishes challenge → Redis `mdn:bridge:handshake` → Velocity computes HMAC → publishes response to `mdn:bridge:handshake:response` → Paper validates
+- **HandshakeTransport interface**: Avoids circular dependency (mdn-bridge can't import mdn-core's RedisManager)
+- **Timing solved**: Bridge defers handshake until Core injects transport, then triggers via `triggerHandshake()` / `triggerHandshakeListener()`
+- **ClassLoader fix**: mdn-core shadowJar excludes `net/minedrop/bridge/**` — prevents `ClassCastException: BridgePaperPlugin cannot be cast to BridgePaperPlugin`
+- **Tested**: Paper 26.2 + Velocity 4.1.0 — handshake VERIFIED end-to-end
+
+### Build-Time signature.json
+- **Gradle task**: `generateSignature` runs after `jar`, computes SHA-256 of ZIP entries (skipping signature.json), writes JSON
+- **Runtime mirror**: `BridgeManager.computeJarHash()` iterates ZIP entries the same way — hashes match exactly
+- **Output**: `{"plugin_id":"mdn-bridge","version":"1.0.0-SNAPSHOT","build_hash":"f2b389f1..."}`
+
+---
+
 ## Round 4 — Dead Letter Queue & Operation Timeouts
 
 **Commit**: *(current working state)*
@@ -530,9 +552,9 @@ CircuitBreakerTest (mdn-core) — 7 tests:
 ## Known Gaps & Future Work
 
 ### Things explicitly left as stubs (by design)
-- `BridgePaperPlugin.performHandshake()` — Currently validates HMAC locally. In production, it should publish to Redis and await Velocity's response asynchronously.
+- `BridgePaperPlugin.performHandshake()` — **DONE (Round 6)**: Now publishes challenge to Redis, subscribes to response channel, validates Velocity HMAC. Tested end-to-end on live servers.
 - `DataSyncEngine.saveAll()` — Flushes pending saves but doesn't iterate all active server sessions. Full implementation requires tracking all online player UUIDs.
-- `BridgeVelocityPlugin` — Doesn't subscribe to `mdn:bridge:handshake` Redis channel yet. The handshake is self-validated on the Paper side.
+- `BridgeVelocityPlugin` — **DONE (Round 6)**: Now subscribes to `mdn:bridge:handshake`, computes HMAC, publishes response. Triggered after transport injected.
 - `PacketDispatcher` — Only dispatches to registered handlers. No built-in handlers registered yet (that's for each plugin to do).
 - `InventorySyncManager` — Stores combined inv+ec as JSON. A proper implementation would store them as separate columns or use Bukkit's native serialization.
 
@@ -591,6 +613,7 @@ CircuitBreakerTest (mdn-core) — 7 tests:
 | 2026-08-04 | `dddaa76` | Redis connection reset fix (JedisPoolConfig validation) + Bridge shadow JAR build fix (jar classifier + explicit Jackson deps) |
 | 2026-08-04 | `ae71f4f` | Duplicate velocity-plugin.json deduplication — removed manual templates, annotation processor now sole source of truth |
 | 2026-08-04 | `81da386` | Velocity config bootstrap — saveDefaultConfig() for both plugins, config-velocity.yml now copies to disk, routing.default-region path support |
+| 2026-08-05 | `ed69f5d` | Cross-server handshake via Redis Pub/Sub + build-time signature.json generation + ClassLoader conflict fix |
 
 ---
 

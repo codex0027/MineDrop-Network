@@ -76,8 +76,18 @@ public final class BridgePaperPlugin extends JavaPlugin {
 
     @Override
     public void onEnable() {
-        getLogger().info("Initiating Velocity handshake (retries: 3)...");
-        // Start the async handshake chain — first attempt
+        // Handshake is triggered by CorePaperPlugin after Redis transport is ready.
+        // Deferring until then — see triggerHandshake() below.
+        getLogger().info("MDN-Bridge enabled. Waiting for Core to inject Redis transport...");
+    }
+
+    /**
+     * Called by CorePaperPlugin after injecting the handshake transport.
+     * This solves the timing problem: Bridge.onEnable() runs before Core.onEnable(),
+     * so Redis isn't ready when Bridge first tries the handshake.
+     */
+    public void triggerHandshake() {
+        getLogger().info("Redis transport ready — initiating Velocity handshake (retries: 3)...");
         attemptHandshakeAsync(1);
     }
 
@@ -110,17 +120,29 @@ public final class BridgePaperPlugin extends JavaPlugin {
 
         getLogger().info("Handshake attempt " + attempt + "/" + maxRetries + "...");
 
+        // If transport not ready yet, wait and retry more frequently
+        // (MDN-Core may still be initializing Redis)
+        if (!bridgeManager.isRedisReady()) {
+            getLogger().warning("Redis transport not ready — retrying in 1s...");
+            if (attempt < maxRetries) {
+                Bukkit.getScheduler().runTaskLaterAsynchronously(this,
+                        () -> attemptHandshakeAsync(attempt + 1), 20L); // 20 ticks = 1 second
+            } else {
+                getLogger().severe("Handshake FAILED after " + maxRetries + " attempts — transport never ready!");
+                handleHandshakeFailure();
+            }
+            return;
+        }
+
         // Perform the actual cross-server handshake via Redis
         performCrossServerHandshake().thenAcceptAsync(result -> {
             if (result) {
                 getLogger().info("Velocity handshake SUCCESS on attempt " + attempt);
             } else if (attempt < maxRetries) {
-                // Failed, but can retry — schedule next attempt with 3s delay (async)
                 getLogger().warning("Handshake attempt " + attempt + " failed. Retrying in 3s (async)...");
                 Bukkit.getScheduler().runTaskLaterAsynchronously(this,
-                        () -> attemptHandshakeAsync(attempt + 1), 60L); // 60 ticks = 3 seconds
+                        () -> attemptHandshakeAsync(attempt + 1), 60L);
             } else {
-                // All retries exhausted
                 getLogger().severe("Handshake FAILED after " + maxRetries + " attempts!");
                 handleHandshakeFailure();
             }
@@ -138,8 +160,15 @@ public final class BridgePaperPlugin extends JavaPlugin {
 
     /**
      * Performs a true cross-server handshake via Redis Pub/Sub.
-     * Publishes a challenge, subscribes to a response channel, and validates
-     * the HMAC response from Velocity (fixes H-3 — self-validation bypass).
+     * <p>
+     * Flow:
+     * <ol>
+     *   <li>Generate a random challenge (SHA-256 of UUID + timestamp)</li>
+     *   <li>Publish challenge JSON to Redis channel {@code mdn:bridge:handshake}</li>
+     *   <li>Subscribe to {@code mdn:bridge:handshake:response} and listen for the
+     *       matching challenge's HMAC response from Velocity</li>
+     *   <li>Validate HMAC — if correct, establish session token</li>
+     * </ol>
      *
      * @return CompletableFuture that resolves to true if handshake succeeded
      */
@@ -148,37 +177,62 @@ public final class BridgePaperPlugin extends JavaPlugin {
 
         Bukkit.getScheduler().runTaskAsynchronously(this, () -> {
             try {
+                if (!bridgeManager.isRedisReady()) {
+                    getLogger().warning("Redis not ready — handshake deferred");
+                    result.complete(false);
+                    return;
+                }
+
                 // Step 1: Generate challenge
                 String challenge = bridgeManager.generateHandshakeChallenge();
+                String expectedResponse = bridgeManager.computeHandshakeResponse(challenge);
 
-                // Step 2: Register pending handshake — listen for Velocity's response
+                // Step 2: Build challenge JSON
+                String challengeJson = String.format(
+                        "{\"challenge\":\"%s\",\"server\":\"%s\",\"timestamp\":%d}",
+                        challenge, bridgeManager.getServerIdentity(), System.currentTimeMillis());
+
+                // Step 3: Register pending handshake future
                 CompletableFuture<String> responseFuture = new CompletableFuture<>();
                 pendingHandshakes.put(challenge, responseFuture);
 
-                // Step 3: Subscribe to the response channel to catch Velocity's reply
-                // (In production this is a Redis subscription, but for the initial
-                // handshake we use a direct publish/poll pattern via the bridge manager)
-                // The Velocity side publishes back with: challenge + ":" + hmac
-                String expectedResponse = bridgeManager.computeHandshakeResponse(challenge);
+                // Step 4: Subscribe to response channel — complete the future
+                // when Velocity's response arrives with the matching challenge
+                bridgeManager.subscribeHandshake(HANDSHAKE_RESPONSE_CHANNEL, raw -> {
+                    try {
+                        // Parse response JSON: {"challenge":"...","response":"...","server":"..."}
+                        var node = BridgeManager.parseSimpleJson(raw);
+                        String respChallenge = node.get("challenge");
+                        String respValue = node.get("response");
+                        if (respChallenge != null && respChallenge.equals(challenge)) {
+                            CompletableFuture<String> f = pendingHandshakes.get(respChallenge);
+                            if (f != null && !f.isDone()) {
+                                f.complete(respValue);
+                            }
+                        }
+                    } catch (Exception ignored) {
+                        // Malformed handshake response — ignore
+                    }
+                });
 
-                // Step 4: The cross-server handshake is completed when MDN-Core
-                // initializes Redis on both ends. For now, validate locally with
-                // the shared secret to ensure the server has the correct key.
-                // In production, Redis pub/sub on channel "mdn:bridge:handshake"
-                // relays the challenge to Velocity and captures the response.
+                // Step 5: Publish challenge to Velocity
+                bridgeManager.publishHandshake(HANDSHAKE_CHALLENGE_CHANNEL, challengeJson);
+                getLogger().info("Handshake challenge published to Redis for server: "
+                        + bridgeManager.getServerIdentity());
 
-                // Step 5: Wait for the response on the response channel
+                // Step 6: Wait for Velocity's response
                 try {
                     String velocityResponse = responseFuture.get(
                             bridgeManager.getHandshakeTimeoutSeconds(), TimeUnit.SECONDS);
                     pendingHandshakes.remove(challenge);
 
-                    // Step 6: Validate — the response should match our expected HMAC
+                    // Step 7: Validate HMAC
                     if (expectedResponse.equals(velocityResponse)) {
                         bridgeManager.setActiveSessionToken(velocityResponse);
+                        getLogger().info("Handshake VERIFIED — session established with Velocity");
                         result.complete(true);
                     } else {
-                        getLogger().warning("Handshake response MISMATCH");
+                        getLogger().warning("Handshake response MISMATCH — possible key mismatch");
                         result.complete(false);
                     }
                 } catch (TimeoutException e) {

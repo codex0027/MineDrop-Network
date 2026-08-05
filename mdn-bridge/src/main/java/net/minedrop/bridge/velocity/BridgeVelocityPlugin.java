@@ -30,14 +30,27 @@ import java.util.Map;
 )
 public final class BridgeVelocityPlugin {
 
+    private static final String HANDSHAKE_CHALLENGE_CHANNEL = "mdn:bridge:handshake";
+    private static final String HANDSHAKE_RESPONSE_CHANNEL = "mdn:bridge:handshake:response";
+
     private final ProxyServer server;
     private final Logger logger;
     private BridgeManager bridgeManager;
+    private static volatile BridgeVelocityPlugin pluginInstance;
+    private boolean handshakeListenerStarted = false;
 
     @Inject
     public BridgeVelocityPlugin(ProxyServer server, Logger logger) {
         this.server = server;
         this.logger = logger;
+        pluginInstance = this;
+    }
+
+    /** Called by CoreVelocityPlugin after injecting handshake transport. */
+    public static void triggerHandshakeListener() {
+        if (pluginInstance != null) {
+            pluginInstance.startHandshakeListener();
+        }
     }
 
     @Subscribe
@@ -62,12 +75,69 @@ public final class BridgeVelocityPlugin {
         // ── Self-register ──
         bridgeManager.register("MDN-Bridge", this.getClass());
 
-        // ── Subscribe to handshake channel ──
-        // In production, this subscribes to Redis "mdn:bridge:handshake"
-        // and responds with HMAC signatures when Paper servers challenge.
+        // ── Self-register ──
+        bridgeManager.register("MDN-Bridge", this.getClass());
+
         logger.info("MDN-Bridge Velocity initialized.");
         logger.info("Server identity: {}", bridgeManager.getServerIdentity());
-        logger.info("Listening for handshake challenges on mdn:bridge:handshake...");
+
+        // ── Start handshake listener if Redis is already available ──
+        // (If not, CoreVelocityPlugin will trigger it after Redis init)
+        startHandshakeListener();
+    }
+
+    /**
+     * Subscribes to the Redis handshake challenge channel and responds
+     * with HMAC-signed responses for every Paper server that challenges.
+     * <p>
+     * This is idempotent — called both from onProxyInitialize() (if Redis
+     * is already ready) and externally by CoreVelocityPlugin after Redis
+     * initialization completes.
+     */
+    public void startHandshakeListener() {
+        if (handshakeListenerStarted) return;
+        if (!bridgeManager.isRedisReady()) {
+            logger.info("Redis not yet ready — handshake listener deferred");
+            return;
+        }
+
+        handshakeListenerStarted = true;
+        logger.info("Starting handshake listener on {}...", HANDSHAKE_CHALLENGE_CHANNEL);
+
+        bridgeManager.subscribeHandshake(HANDSHAKE_CHALLENGE_CHANNEL, raw -> {
+            try {
+                // Parse challenge: {"challenge":"<sha256>","server":"<id>","timestamp":<epoch>}
+                var node = BridgeManager.parseSimpleJson(raw);
+                String challenge = node.get("challenge");
+                String paperServer = node.get("server");
+
+                if (challenge == null || challenge.isBlank()) {
+                    logger.debug("Ignoring malformed handshake challenge");
+                    return;
+                }
+
+                logger.info("Received handshake challenge from {}: {}",
+                        paperServer != null ? paperServer : "unknown", challenge.substring(0, 8) + "...");
+
+                // Compute HMAC response
+                String response = bridgeManager.computeHandshakeResponse(challenge);
+
+                // Build response JSON
+                String responseJson = String.format(
+                        "{\"challenge\":\"%s\",\"response\":\"%s\",\"server\":\"%s\"}",
+                        challenge, response, bridgeManager.getServerIdentity());
+
+                // Publish response back via Redis
+                bridgeManager.publishHandshake(HANDSHAKE_RESPONSE_CHANNEL, responseJson);
+                logger.info("Handshake response published for server: {}",
+                        paperServer != null ? paperServer : "unknown");
+
+            } catch (Exception e) {
+                logger.error("Error processing handshake challenge", e);
+            }
+        });
+
+        logger.info("Handshake listener active — responding to Paper server challenges");
     }
 
     // ── Default config bootstrap ──

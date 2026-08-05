@@ -2,6 +2,8 @@ package net.minedrop.core.paper;
 
 import net.minedrop.api.ApiVersion;
 import net.minedrop.api.MDNAPI;
+import net.minedrop.bridge.BridgeManager;
+import net.minedrop.bridge.paper.BridgePaperPlugin;
 import net.minedrop.core.cache.PlayerCache;
 import net.minedrop.core.database.DatabaseManager;
 import net.minedrop.core.packet.PacketDispatcher;
@@ -88,6 +90,22 @@ public final class CorePaperPlugin extends JavaPlugin implements Listener {
         // ── Step 6: Initialize MDN-API ──
         MDNAPI.initialize(databaseManager.getDataSource(), redisManager.getJedisPool());
         getLogger().info("MDN-API initialized (instance: " + MDNAPI.getInstance().getInstanceId() + ")");
+
+        // ── Step 6.5: Inject handshake transport into BridgeManager ──
+        // This enables cross-server handshake — BridgePaperPlugin's retry loop
+        // will now successfully publish/subscribe via Redis on its next attempt.
+        BridgeManager.getInstance().setHandshakeTransport(new BridgeManager.HandshakeTransport() {
+            public void publish(String channel, String message) { redisManager.publish(channel, message); }
+            public void subscribe(String channel, java.util.function.Consumer<String> h) { redisManager.subscribe(channel, h); }
+            public boolean isConnected() { return redisManager.isConnected(); }
+        });
+
+        // Trigger the deferred handshake on BridgePaperPlugin now that Redis is ready
+        var bridgePlugin = (BridgePaperPlugin) getServer().getPluginManager().getPlugin("MDN-Bridge");
+        if (bridgePlugin != null && bridgePlugin.isEnabled()) {
+            bridgePlugin.triggerHandshake();
+            getLogger().info("Triggered BridgePaperPlugin handshake");
+        }
 
         // ── Step 7: Initialize subsystems (create PacketDispatcher FIRST) ──
         // Order matters: DeadLetterQueue's retry lambda captures packetDispatcher,

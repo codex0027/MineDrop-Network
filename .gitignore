@@ -25,3 +25,4 @@ Thumbs.db
 *.key
 *.pem
 secrets.properties
+server/

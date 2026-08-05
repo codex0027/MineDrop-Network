@@ -19,6 +19,8 @@ import net.kyori.adventure.text.format.TextDecoration;
 import net.minedrop.api.MDNAPI;
 import net.minedrop.api.packet.MDNPacket;
 import net.minedrop.api.packet.ServerHeartbeatPacket;
+import net.minedrop.bridge.BridgeManager;
+import net.minedrop.bridge.velocity.BridgeVelocityPlugin;
 import net.minedrop.core.cache.PlayerCache;
 import net.minedrop.core.packet.PacketDispatcher;
 import net.minedrop.core.redis.RedisManager;
@@ -89,6 +91,20 @@ public final class CoreVelocityPlugin {
         // MDNAPI must be initialized before PlayerCache (which calls getObjectMapper()).
         MDNAPI.initialize(null, redisManager.getJedisPool());
         logger.info("MDN-API initialized on Velocity (Redis-only mode)");
+
+        // ── Inject handshake transport into BridgeManager ──
+        // This enables the Velocity-side handshake listener to respond to
+        // Paper server challenges. BridgeVelocityPlugin.onProxyInitialize()
+        // deferred its listener because Redis wasn't ready yet — now trigger it.
+        BridgeManager.getInstance().setHandshakeTransport(new BridgeManager.HandshakeTransport() {
+            public void publish(String channel, String message) { redisManager.publish(channel, message); }
+            public void subscribe(String channel, java.util.function.Consumer<String> h) { redisManager.subscribe(channel, h); }
+            public boolean isConnected() { return redisManager.isConnected(); }
+        });
+
+        // Trigger the deferred handshake listener on BridgeVelocityPlugin
+        BridgeVelocityPlugin.triggerHandshakeListener();
+        logger.info("Triggered BridgeVelocityPlugin handshake listener");
 
         // ── Initialize subsystems ──
         playerCache = new PlayerCache(redisManager);

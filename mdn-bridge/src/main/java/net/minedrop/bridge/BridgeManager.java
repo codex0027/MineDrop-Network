@@ -11,6 +11,7 @@ import net.minedrop.api.security.SecurityUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.URI;
@@ -25,6 +26,8 @@ import java.time.Duration;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Consumer;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipInputStream;
 
 /**
  * Central manager for MDN-Bridge.
@@ -73,6 +76,16 @@ public final class BridgeManager {
 
     // Callback for disabling a plugin on verification failure
     private Consumer<String> pluginDisabler;
+
+    /** Transport for cross-server handshake messages via Redis. */
+    public interface HandshakeTransport {
+        void publish(String channel, String message);
+        void subscribe(String channel, java.util.function.Consumer<String> handler);
+        boolean isConnected();
+    }
+
+    // Handshake transport — injected by MDN-Core after Redis initialization
+    private volatile HandshakeTransport transport;
 
     private BridgeManager() {}
 
@@ -125,6 +138,47 @@ public final class BridgeManager {
 
     public void setActiveSessionToken(String token) { this.activeSessionToken = token; }
     public String getActiveSessionToken() { return activeSessionToken; }
+
+    /**
+     * Injects the handshake transport after MDN-Core initializes Redis.
+     * Called by CorePaperPlugin.onEnable() and CoreVelocityPlugin.onProxyInitialize().
+     * Once set, enables cross-server handshake via Redis Pub/Sub.
+     */
+    public void setHandshakeTransport(HandshakeTransport t) {
+        this.transport = t;
+        log.info("Handshake transport injected — cross-server handshake enabled");
+    }
+
+    public boolean isRedisReady() {
+        // Only check that transport is injected — actual Redis connectivity
+        // is handled by RedisManager internally with retries and health checks.
+        // Checking isConnected() here is too slow for the handshake race.
+        return transport != null;
+    }
+
+    /** Publishes a handshake message. Returns false if transport is not ready. */
+    public boolean publishHandshake(String channel, String message) {
+        if (transport == null) return false;
+        try {
+            transport.publish(channel, message);
+            return true;
+        } catch (Exception e) {
+            log.error("Failed to publish handshake on '{}'", channel, e);
+            return false;
+        }
+    }
+
+    /** Subscribes to a handshake channel. Returns false if transport is not ready. */
+    public boolean subscribeHandshake(String channel, Consumer<String> handler) {
+        if (transport == null) return false;
+        try {
+            transport.subscribe(channel, handler);
+            return true;
+        } catch (Exception e) {
+            log.error("Failed to subscribe handshake on '{}'", channel, e);
+            return false;
+        }
+    }
 
     /**
      * Sets a callback that disables a plugin by name.
@@ -291,13 +345,36 @@ public final class BridgeManager {
     }
 
     /**
-     * Computes the SHA-256 hex hash of the actual JAR file bytes.
+     * Computes the SHA-256 hex hash of the JAR file, skipping signature.json.
+     * <p>
+     * We iterate the ZIP entries in order and hash their contents — but explicitly
+     * skip {@code signature.json}. This solves the chicken-and-egg problem:
+     * the build-time hash cannot include the signature file that contains the hash.
+     * <p>
+     * The Gradle task {@code generateSignature} computes the hash the same way,
+     * so the hash embedded in signature.json matches what this method produces.
      */
     private String computeJarHash(Path jarPath) {
-        try {
-            byte[] jarBytes = Files.readAllBytes(jarPath);
+        try (ZipInputStream zis = new ZipInputStream(Files.newInputStream(jarPath))) {
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            byte[] hash = digest.digest(jarBytes);
+            ZipEntry entry;
+            while ((entry = zis.getNextEntry()) != null) {
+                if (entry.isDirectory()) continue;
+                if ("signature.json".equals(entry.getName())) continue;
+
+                // Hash the entry name (for deterministic ordering across builds)
+                digest.update(entry.getName().getBytes(StandardCharsets.UTF_8));
+
+                // Hash the entry contents
+                byte[] buf = new byte[8192];
+                int len;
+                while ((len = zis.read(buf)) > 0) {
+                    digest.update(buf, 0, len);
+                }
+                zis.closeEntry();
+            }
+
+            byte[] hash = digest.digest();
             StringBuilder hex = new StringBuilder();
             for (byte b : hash) {
                 String h = Integer.toHexString(0xff & b);
@@ -307,7 +384,7 @@ public final class BridgeManager {
             return hex.toString();
         } catch (Exception e) {
             log.error("Failed to compute JAR hash for {}", jarPath, e);
-            return "ERROR-" + UUID.randomUUID(); // Never matches any allowed hash
+            return "ERROR-" + UUID.randomUUID();
         }
     }
 
@@ -345,6 +422,37 @@ public final class BridgeManager {
     }
 
     // ── Discord Alerting ──
+
+    /**
+     * Simple JSON parser for handshake messages.
+     * Extracts top-level string fields without relying on Jackson
+     * (usable before MDN-API/Jackson is fully initialized).
+     */
+    public static Map<String, String> parseSimpleJson(String raw) {
+        Map<String, String> map = new HashMap<>();
+        if (raw == null || raw.isBlank()) return map;
+
+        // Extract "key":"value" pairs at the top level
+        int pos = 0;
+        while ((pos = raw.indexOf('"', pos)) >= 0) {
+            int keyEnd = raw.indexOf('"', pos + 1);
+            if (keyEnd < 0) break;
+            String key = raw.substring(pos + 1, keyEnd);
+
+            int colonPos = raw.indexOf(':', keyEnd);
+            if (colonPos < 0) break;
+
+            int valStart = raw.indexOf('"', colonPos);
+            if (valStart < 0) break;
+            int valEnd = raw.indexOf('"', valStart + 1);
+            if (valEnd < 0) break;
+            String value = raw.substring(valStart + 1, valEnd);
+
+            map.put(key, value);
+            pos = valEnd + 1;
+        }
+        return map;
+    }
 
     /**
      * Sends an alert to the configured Discord webhook on security events.

@@ -146,6 +146,14 @@ public final class BridgeVelocityPlugin {
                     bridgeManager.setHandshakeTimeoutSeconds(
                             parseInt(bridge.get("handshake-timeout-seconds"), 10));
                 }
+                if (bridge.containsKey("debug-mode")) {
+                    boolean debugRequested = Boolean.parseBoolean(
+                            String.valueOf(bridge.get("debug-mode")));
+                    if (debugRequested) {
+                        bridgeManager.setDebugMode(true);
+                        logger.warn("DEBUG MODE ACTIVE — verification bypassed");
+                    }
+                }
             }
 
             logger.info("Loaded MDN-Bridge Velocity config.");

@@ -2,7 +2,7 @@
 
 > **Purpose**: Every single change — no matter how small — is logged here chronologically.  
 > **For**: New developers onboarding, debugging "why was this done this way", and auditing changes.  
-> **Last Updated**: August 5, 2026 — handshake race fix + signature hash fix + mdn-core registration
+> **Last Updated**: August 6, 2026 — signature auto-gen + Velocity allowed-hashes + server eviction fix
 
 ---
 

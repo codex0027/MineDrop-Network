@@ -326,14 +326,22 @@ public final class CoreVelocityPlugin {
         }
     }
 
+    /**
+     * Discovers servers configured in velocity.toml.
+     * Does NOT pre-register them — servers self-register via heartbeat.
+     * Pre-registration causes premature eviction when a server hasn't
+     * started sending heartbeats yet (the 45s timeout fires before the
+     * actual server process boots).
+     */
     private void discoverServers() {
+        int count = 0;
         for (RegisteredServer server : proxy.getAllServers()) {
             String name = server.getServerInfo().getName();
-            serverRegistry.registerServer(name, new ServerRegistry.ServerInfo(
-                    name, inferServerGroup(name), defaultRegion,
-                    100
-            ));
+            logger.info("Discovered configured server: {} (group: {})",
+                    name, inferServerGroup(name));
+            count++;
         }
+        logger.info("{} configured server(s) found — awaiting heartbeats", count);
     }
 
     private String inferServerGroup(String name) {

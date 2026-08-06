@@ -1,7 +1,7 @@
 # 🚀 MineDrop Network — Pterodactyl Deployment Guide
 
 > **Target**: 1 Velocity proxy + 2+ Paper game servers, all managed via Pterodactyl Panel  
-> **Last Updated**: August 4, 2026 (evening — Redis + Bridge shadow JAR fixes)
+> **Last Updated**: August 6, 2026 (signature.json auto-generation + server eviction fix)
 > **Plugin Versions**: mdn-bridge 1.0.0, mdn-core 1.0.0
 >
 > **Two setup paths**:
@@ -227,6 +227,11 @@ cd MineDrop-Network
 JAVA_HOME=/usr/lib/jvm/java-1.21.0-openjdk-amd64 ./gradlew :mdn-bridge:shadowJar :mdn-core:shadowJar
 ```
 
+> 💡 **signature.json is now auto-generated** — `mdn-bridge:shadowJar` automatically runs
+> the `generateSignature` task, injecting a signed `signature.json` into the JAR.
+> The build log will print the hash: `[signature] mdn-bridge: <hash>`.
+> Copy this hash into the `allowed-build-hashes` list in every `mdn-bridge/config.yml`.
+
 The JARs are at:
 - `mdn-bridge/build/libs/mdn-bridge-1.0.0-SNAPSHOT.jar`
 - `mdn-core/build/libs/mdn-core-1.0.0-SNAPSHOT.jar`
@@ -250,6 +255,9 @@ bridge:
   secret-api-key: "your-shared-secret-key-change-me"
   handshake-timeout-seconds: 10
   handshake-retries: 3
+  debug-mode: false
+  allowed-build-hashes:
+    - "<paste-hash-from-build-log-here>"
 ```
 
 ### Step 10: Upload to Each Paper Server
@@ -273,7 +281,8 @@ bridge:
   server-identity: "paper-lobby-01"    # CHANGE per server!
   secret-api-key: "your-shared-secret-key-change-me"
   handshake-timeout-seconds: 10
-  allowed-build-hashes: []             # Leave empty for now
+  allowed-build-hashes:
+    - "<paste-hash-from-build-log-here>"
   debug-mode: false                    # NEVER enable on public IP!
 
 verification-failure:
@@ -410,17 +419,26 @@ Registered Servers (2):
 
 ---
 
-## 🔧 Build Notes (August 4, 2026 — Evening Build)
+## 🔧 Build Notes (August 6, 2026)
 
 ### Critical fixes in this build:
 
-1. **Redis "Connection reset"** — JedisPoolConfig now has `testOnCreate`, `testOnBorrow`,
+1. **signature.json auto-generation** — `mdn-bridge:shadowJar` now automatically runs
+   `generateSignature` (via `finalizedBy`). No need to run `build` separately — the hash
+   is injected into every shadow JAR. Copy the printed hash into `allowed-build-hashes`
+   in every `mdn-bridge/config.yml` to enable signature verification.
+
+2. **Velocity allowed-build-hashes** — BridgeVelocityPlugin now reads `allowed-build-hashes`
+   from config (previously only BridgePaperPlugin did). Both sides now validate.
+
+3. **Server eviction fix** — `discoverServers()` on Velocity no longer pre-registers servers
+   in the registry. Servers only appear when they send heartbeats, eliminating the premature
+   "EVICTED (no heartbeat for 45s)" warning before Paper has finished booting.
+
+4. **Redis "Connection reset"** — JedisPoolConfig now has `testOnCreate`, `testOnBorrow`,
    and `testWhileIdle` validation. Prevents dead connections in Docker/Pterodactyl.
 
-2. **Bridge shadow JAR** — Fixed `jar` task overwriting `shadowJar` on clean builds.
-   Both JARs now properly bundle all dependencies (4.0 MB each).
-
-3. **Startup ordering** — PacketDispatcher created before DeadLetterQueue (no more NPE).
+5. **Startup ordering** — PacketDispatcher created before DeadLetterQueue (no more NPE).
    MDNAPI initialized on Velocity. BridgeManager decoupled from MDNAPI.
 
 ### JAR locations after build:

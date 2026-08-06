@@ -16,3 +16,9 @@ bridge:
 
   # Number of retry attempts before declaring failure
   handshake-retries: 3
+
+  # Build hashes that are allowed to pass signature verification.
+  # After every build, copy the new hash from the build log
+  # ([signature] mdn-bridge: <hash>) into this list.
+  allowed-build-hashes:
+    - "PLACEHOLDER-build-hash-here"

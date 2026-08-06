@@ -109,6 +109,10 @@ with zipfile.ZipFile(jar, 'a', zipfile.ZIP_STORED) as zf:
 }
 tasks.build { dependsOn(generateSignature) }
 
+// Ensure shadowJar always triggers signature generation (even when run directly).
+// This way `./gradlew :mdn-bridge:shadowJar` produces a fully signed JAR.
+tasks.shadowJar { finalizedBy(generateSignature) }
+
 // Hashes JAR by iterating ZIP entries, skipping signature.json (matches BridgeManager.computeJarHash)
 // Entries are sorted alphabetically to make the hash invariant to ZIP entry order
 // (which changes when signature.json is injected via jar uf).

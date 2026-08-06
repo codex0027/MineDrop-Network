@@ -13,6 +13,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -71,9 +72,6 @@ public final class BridgeVelocityPlugin {
                 logger.warn("Plugin '{}' marked as insecure — restricted.", pluginId);
             });
         });
-
-        // ── Self-register ──
-        bridgeManager.register("MDN-Bridge", this.getClass());
 
         // ── Self-register ──
         bridgeManager.register("MDN-Bridge", this.getClass());
@@ -222,6 +220,16 @@ public final class BridgeVelocityPlugin {
                     if (debugRequested) {
                         bridgeManager.setDebugMode(true);
                         logger.warn("DEBUG MODE ACTIVE — verification bypassed");
+                    }
+                }
+                if (bridge.containsKey("allowed-build-hashes")) {
+                    Object hashesObj = bridge.get("allowed-build-hashes");
+                    if (hashesObj instanceof List<?> list) {
+                        List<String> hashes = list.stream()
+                                .map(String::valueOf)
+                                .toList();
+                        bridgeManager.setAllowedHashes(hashes);
+                        logger.info("Loaded {} allowed build hash(es)", hashes.size());
                     }
                 }
             }

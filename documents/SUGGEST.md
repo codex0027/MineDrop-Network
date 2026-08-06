@@ -2,7 +2,7 @@
 
 > **Purpose**: Every idea, suggestion, and enhancement — whether implemented, planned, or deferred — is cataloged here.  
 > **For**: Future planning, prioritizing work, and ensuring no good idea gets lost.  
-> **Last Updated**: August 5, 2026 — handshake race fix + signature hash fix
+> **Last Updated**: August 6, 2026 — signature auto-gen + Velocity allowed-hashes + server eviction fix
 
 ---
 
@@ -10,11 +10,11 @@
 
 | Status | Count |
 |--------|-------|
-| ✅ Implemented | 29 |
-| 🔜 Planned (Near Future) | 6 |
+| ✅ Implemented | 34 |
+| 🔜 Planned (Near Future) | 5 |
 | 📋 Future Consideration | 10 |
 | ❌ Rejected / Deferred | 2 |
-| **Total** | **49** |
+| **Total** | **53** |
 
 > **📋 See also**: [ISSUES.md](ISSUES.md) — 36 bugs, gaps, and code smells found during deep audit (Aug 4, 2026)
 
@@ -124,30 +124,26 @@ These are targeted for the next development session.
 
 | # | Suggestion | Priority | Effort | Why It Matters |
 |---|-----------|----------|--------|---------------|
-| 48 | **Rate Limiter** per IP/player on packet publishing | 🔥 High | Medium | Prevents one buggy plugin from DoS-ing the Redis bus |
-| 49 | **Local Event Bus** for in-process pub/sub | 🟡 Medium | Medium | Plugins can fire/listen without going through Redis |
-| 50 | **Graceful Degradation Mode** — switch to local-only when Redis is down | 🔥 High | High | Server stays playable even if Redis crashes |
-| 51 | **Database Migration Framework** — auto-run schema changes | 🟡 Medium | High | No more manual ALTER TABLE; track applied versions |
-| 52 | **Connection Pool Metrics** — expose HikariCP stats in /mdn health | 🟡 Medium | Low | Know pool exhaustion BEFORE server dies |
+| 48 | Signature auto-generation for mdn-core — finalizedBy link to generateSignature in build.gradle.kts | Self | `mdn-core/build.gradle.kts` (Phase 11, Step 105) |
+| 49 | Velocity allowed-build-hashes support — BridgeVelocityPlugin reads hashes from config like Paper does | Self | `BridgeVelocityPlugin.java`, `config-velocity.yml` (Phase 11, Steps 106-108) |
+| 50 | Server eviction fix — discoverServers() no longer pre-registers servers (avoids premature EVICTED warning) | Real server logs | `CoreVelocityPlugin.java` (Phase 11, Step 110) |
+| 51 | Startup script rewrite — setsid + Java 25 + wait loops + log capture | Real server logs | `server/startup.sh` (Phase 11, Step 111) |
+| 52 | Remove duplicate BridgeVelocityPlugin self-register call | Code review | `BridgeVelocityPlugin.java` (Phase 11, Step 109) |
 
----
+### Critical Bug Fixes
 
-## 📋 Future Consideration
-
-Longer-term ideas — good to have but not urgent.
-
-| # | Suggestion | Priority | Effort | Notes |
-|---|-----------|----------|--------|-------|
-| 53 | **Prometheus Metrics Export** — `/metrics` endpoint | 🟢 Low | High | Grafana dashboards for the whole network |
-| 54 | **Developer Debug Kit** — `/mdn debug packets`, `/mdn debug cache` | 🟢 Low | Medium | Live packet tracing, cache peeking, Redis ping |
-| 55 | **Packet Batching** — queue packets and flush every 50ms | 🟡 Medium | Medium | Reduces Redis roundtrips at scale |
-| 56 | **Plugin Hot-Reload Safety** — clean resource cleanup on reload | 🟢 Low | Medium | Prevent thread/connection leaks on /mdn reload |
-| 57 | **Structured Logging** — JSON log format for log aggregation | 🟢 Low | Medium | ELK/Splunk integration |
-| 58 | **Multi-Region Support** — latency-based routing | 🟢 Low | High | For EU/NA/ASIA deployment |
-| 59 | **Redis Sentinel/Cluster Support** — high availability Redis | 🟢 Low | Medium | Production HA setup |
-| 60 | **MySQL Read Replicas** — separate read/write connections | 🟢 Low | Medium | Scale read-heavy operations |
-| 61 | **Webhook Notifications** — configurable webhooks for events | 🟢 Low | Low | Admins get Discord/Slack alerts for key events |
-| 62 | **Admin Dashboard API** — REST endpoints for web admin panel | 🟢 Low | High | Future web-based server management |
+| # | Suggestion | Source | Implemented In |
+|---|-----------|--------|---------------|
+| 1
+| 59 | **Developer Debug Kit** — `/mdn debug packets`, `/mdn debug cache` | 🟢 Low | Medium | Live packet tracing, cache peeking, Redis ping |
+| 60 | **Packet Batching** — queue packets and flush every 50ms | 🟡 Medium | Medium | Reduces Redis roundtrips at scale |
+| 61 | **Plugin Hot-Reload Safety** — clean resource cleanup on reload | 🟢 Low | Medium | Prevent thread/connection leaks on /mdn reload |
+| 62 | **Structured Logging** — JSON log format for log aggregation | 🟢 Low | Medium | ELK/Splunk integration |
+| 63 | **Multi-Region Support** — latency-based routing | 🟢 Low | High | For EU/NA/ASIA deployment |
+| 64 | **Redis Sentinel/Cluster Support** — high availability Redis | 🟢 Low | Medium | Production HA setup |
+| 65 | **MySQL Read Replicas** — separate read/write connections | 🟢 Low | Medium | Scale read-heavy operations |
+| 66 | **Webhook Notifications** — configurable webhooks for events | 🟢 Low | Low | Admins get Discord/Slack alerts for key events |
+| 67 | **Admin Dashboard API** — REST endpoints for web admin panel | 🟢 Low | High | Future web-based server management |
 
 ---
 
@@ -157,8 +153,8 @@ Ideas considered but decided against (with reasons).
 
 | # | Suggestion | Reason |
 |---|-----------|--------|
-| 63 | **Java 25 target** | Paper 1.21.1 ecosystem is built for Java 21; Java 25 is too new and Gradle tooling doesn't fully support it yet |
-| 64 | **Separate repos per plugin** | Would require cross-repo version sync and complex build orchestration. Monorepo keeps everything atomic |
+| 68 | **Java 25 target** | Paper 1.21.1 ecosystem is built for Java 21; Java 25 is too new and Gradle tooling doesn't fully support it yet |
+| 69 | **Separate repos per plugin** | Would require cross-repo version sync and complex build orchestration. Monorepo keeps everything atomic |
 
 ---
 
@@ -180,4 +176,4 @@ Ideas considered but decided against (with reasons).
 
 ---
 
-*Last updated: August 5, 2026 — 49 suggestions cataloged*
+*Last updated: August 6, 2026 — 53 suggestions cataloged*

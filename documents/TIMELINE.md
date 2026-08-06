@@ -1,7 +1,7 @@
 # MineDrop Network — Development Timeline
 
 > **Purpose**: Visual roadmap of everything we've built, are building, and will build.  
-> **Last Updated**: August 5, 2026 — handshake race fix + signature hash fix
+> **Last Updated**: August 6, 2026 — signature auto-gen + Velocity allowed-hashes + server eviction fix
 
 ---
 
@@ -170,6 +170,24 @@ Documentation:
 
 Build fixes: 1 error resolved (effectively final lambda variable)
 Status: ✅ Complete Phase 4
+```
+
+---
+
+---
+
+### Phase 11 — Signature Auto-Gen + Eviction Fix (August 6, 2026)
+
+```
+Fixes:
+  ✅ signature.json auto-gen      (finalizedBy link for both bridge + core shadowJar)
+  ✅ Velocity allowed-build-hashes (BridgeVelocityPlugin now reads config list)
+  ✅ Server eviction fix           (discoverServers no longer pre-registers)
+  ✅ Duplicate register removed    (BridgeVelocityPlugin had double self-registration)
+  ✅ Startup script rewrite        (setsid + Java 25 + wait loops + log capture)
+  ✅ mdn-core signature.json      (now generated alongside mdn-bridge)
+
+Verified on live servers: Paper 26.2 + Velocity 4.1.0
 ```
 
 ---

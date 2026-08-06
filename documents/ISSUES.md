@@ -3,7 +3,7 @@
 > **Purpose**: Every issue, bug, gap, code smell, and improvement opportunity found during deep analysis.  
 > **Status**: ✅ **ALL 36 ISSUES + 1 BUILD ISSUE FIXED** — August 4, 2026  
 > **Last Deep Audit**: August 5, 2026  
-> **Last Fix**: August 5, 2026 — handshake race + signature hash + mdn-core registration
+> **Last Fix**: August 6, 2026 — signature auto-gen + Velocity allowed-hashes + server eviction
 > **Files Audited**: 30 source files across mdn-api, mdn-bridge, mdn-core
 
 ---
@@ -16,7 +16,7 @@
 | 🟠 High | 15 | 15 ✅ | 0 |
 | 🟡 Medium | 15 | 15 ✅ | 0 |
 | 🟢 Low | 7 | 7 ✅ | 0 |
-| **Total** | **42** | **42** | **0** |
+| **Total** | **46** | **46** | **0** |
 
 ### Additional Build Issues (Post-Audit)
 

@@ -1,109 +1,47 @@
-# 🔧 Deployment Fix Guide — 3 Issues Found in Logs
+# 🔧 Deployment Fix Guide — Updated August 6, 2026
 
-## What Went Wrong
+## What Went Wrong (Now All Fixed)
 
 | # | Error in Log | What It Means | Status |
 |---|-------------|---------------|--------|
-| 1 | `No implementation for Logger (net.minedrop.libs.slf4j.Logger) was bound` | SLF4J was relocated, Velocity couldn't inject it | ✅ **Fixed in code** — rebuild JARs |
-| 2 | `Plugin 'MDN-Bridge' is missing signature.json` | Paper requires signed plugins | 🔧 **1 setting to change** |
-| 3 | `Communications link failure` (MySQL timeout) | Container can't reach MySQL | 🔧 **1 IP to fix** |
+| 1 | `No implementation for Logger` | SLF4J was relocated, Velocity couldn't inject it | ✅ Fixed — rebuild JARs |
+| 2 | `Plugin 'MDN-Bridge' is missing signature.json` | signature.json not generated at build time | ✅ Fixed — auto-generated via finalizedBy |
+| 3 | `Communications link failure` (MySQL timeout) | Container can't reach MySQL | 🔧 Set correct host IP |
+| 4 | `Server EVICTED: lobby (no heartbeat for 45s)` | discoverServers pre-registered servers | ✅ Fixed — servers self-register via heartbeat |
+| 5 | `Plugin 'MDN-Core' is missing signature.json` | mdn-core had no signature.json | ✅ Fixed — both plugins now auto-generate |
 
 ---
 
-## Fix #1: Re-upload the JARs (SLF4J — Fixed in Code)
+## Fix #1: Rebuild the JARs (signature.json now auto-generated)
 
-The code fix removes the SLF4J relocation that broke Velocity's Guice injection.
-**Just rebuild + re-upload the JARs.** They're already built at:
-
-```
-mdn-bridge/build/libs/mdn-bridge-1.0.0-SNAPSHOT.jar   (18K)
-mdn-core/build/libs/mdn-core-1.0.0-SNAPSHOT.jar       (~4M)
-```
-
-Upload both to **both** servers (Velocity + Lobby) via Pterodactyl File Manager → `plugins/`.
-
----
-
-## Fix #2: Disable Plugin Signature Verification (Paper)
-
-Paper 1.21+ checks for plugin signatures. Our JARs aren't signed → Paper disables them.
-
-### On your Pterodactyl Lobby server:
-
-1. Go to **Startup** tab
-2. Find **"Additional Java Arguments"** or **"Server JAR Flags"**
-3. Add this flag:
-   ```
-   -Dpaper.disable-plugin-signature-verification=true
-   ```
-4. Save
-
-It should look like:
-```
-java -Xmx2G -Dpaper.disable-plugin-signature-verification=true -jar server.jar nogui
-```
-
-> ⚠️ This is safe for development. In production, you'd sign the JARs properly (separate guide).
-
----
-
-## Fix #3: Fix MySQL Host IP (Connectivity)
-
-The log shows `Connect timed out` — the plugin config has the wrong host IP.
-Pterodactyl containers use Docker — they CANNOT reach `127.0.0.1` on the host.
-
-### Option A: Use Docker Bridge IP (best)
-
-SSH into your VPS and run:
 ```bash
-ip addr show docker0 | grep "inet "
+cd MineDrop-Network
+JAVA_HOME=/usr/lib/jvm/java-1.21.0-openjdk-amd64 ./gradlew :mdn-bridge:shadowJar :mdn-core:shadowJar
 ```
 
-If it shows `172.17.0.1`, use that as your MySQL/Redis host.
-
-### Option B: Use Pterodactyl's Database Host Feature
-
-1. **Pterodactyl Admin** → **Database Hosts** → Add:
-   - Name: `VPS MySQL`
-   - Host: `172.17.0.1` (or the Docker bridge IP)
-   - Port: `3306`
-   - Username: `root` (or your MySQL user)
-
-2. Go to **Lobby Server** → **Database** tab → **New Database**
-3. Note the connection details Pterodactyl gives you.
-
-### Option C: Allow External MySQL Connections
-
-SSH into VPS:
-```bash
-# Edit MySQL config to listen on all interfaces
-sudo nano /etc/mysql/mariadb.conf.d/50-server.cnf
-# Change: bind-address = 0.0.0.0
-
-# Create a user that can connect from Docker
-sudo mysql -u root -p
+The build log prints the hashes:
+```
+  [signature] mdn-bridge: d78a76a066371c549912c21be1c18ee16d2d63eb7404c45d5d83e47c2048bc2b
+  [signature] mdn-core: 9bfac3f66f53394533cbb4094179e1aa5ec2b34af0a54934ae54b5dccb01f8df
 ```
 
-```sql
-CREATE USER 'mdn_user'@'172.%' IDENTIFIED BY 'YourPassword123!';
-GRANT ALL PRIVILEGES ON minedrop.* TO 'mdn_user'@'172.%';
-FLUSH PRIVILEGES;
-```
-
-Then use `172.17.0.1` as the host in `config.yml`.
+Copy these hashes into the config files below. Upload JARs to both servers via Pterodactyl File Manager → `plugins/`.
 
 ---
 
-## Final Config Files (Updated)
+## Fix #2: Update Config Files with Build Hashes
 
 ### Velocity Proxy: `plugins/mdn-bridge/config.yml`
 
 ```yaml
 bridge:
   server-identity: "velocity-proxy-01"
-  secret-api-key: "my-shared-secret-key-2024"
+  secret-api-key: "your-shared-secret-key-change-me"
   handshake-timeout-seconds: 10
   handshake-retries: 3
+  debug-mode: false
+  allowed-build-hashes:
+    - "d78a76a066371c549912c21be1c18ee16d2d63eb7404c45d5d83e47c2048bc2b"
 ```
 
 ### Paper Lobby: `plugins/mdn-bridge/config.yml`
@@ -111,10 +49,11 @@ bridge:
 ```yaml
 bridge:
   server-identity: "paper-lobby-01"
-  secret-api-key: "my-shared-secret-key-2024"
+  secret-api-key: "your-shared-secret-key-change-me"
   handshake-timeout-seconds: 10
   handshake-retries: 3
-  allowed-build-hashes: []
+  allowed-build-hashes:
+    - "d78a76a066371c549912c21be1c18ee16d2d63eb7404c45d5d83e47c2048bc2b"
   debug-mode: false
 
 verification-failure:
@@ -163,6 +102,22 @@ commands:
 
 ---
 
+## Fix #3: Fix MySQL Host IP (Connectivity)
+
+The log shows `Connect timed out` — the plugin config has the wrong host IP.
+Pterodactyl containers use Docker — they CANNOT reach `127.0.0.1` on the host.
+
+### Option A: Use Docker Bridge IP (best)
+
+SSH into your VPS and run:
+```bash
+ip addr show docker0 | grep "inet "
+```
+
+If it shows `172.17.0.1`, use that as your MySQL/Redis host.
+
+---
+
 ## Startup Order (Every Time)
 
 ```
@@ -171,8 +126,6 @@ commands:
 3. Start Velocity     →  wait for console: "Listening on"
 4. Test: /mdn health on lobby console
 ```
-
----
 
 ## Quick Test Commands
 
@@ -189,7 +142,4 @@ docker exec <lobby-container> redis-cli -h 172.17.0.1 PING
 
 ---
 
-## If It Still Fails
-
-Upload your new logs to the repo as `Lobby.log` and `Proxy.log` and ping me.
-I'll read them and fix whatever's left.
+*Last updated: August 6, 2026 — signature.json auto-gen, Velocity allowed-hashes, server eviction fix*

@@ -1,8 +1,8 @@
 # MineDrop Network — Development Diary
 
-> **Last Updated**: August 5, 2026 — handshake race fix + signature hash fix  
-> **Build Status**: ✅ Both plugins signature-verified, handshake on attempt 1  
-> **Branch**: `main` | **Commit**: `de86137`
+> **Last Updated**: August 6, 2026 — signature.json auto-gen + Velocity allowed-hashes + server eviction fix  
+> **Build Status**: ✅ Both plugins signature-verified, handshake on attempt 1, no eviction warnings
+> **Branch**: `main` | **Commit**: *(pending push)*
 
 > **📚 Companion Docs**: [STEPS.md](STEPS.md) (step-by-step log) · [SUGGEST.md](SUGGEST.md) (suggestions catalog) · [TIMELINE.md](TIMELINE.md) (roadmap)
 
@@ -337,6 +337,43 @@ Added `saveDefaultConfig()` methods to both Velocity plugins:
 
 ---
 
+## Round 7 — Signature Auto-Gen + Eviction Fix (August 6, 2026)
+
+**What was changed**:
+
+### signature.json auto-generation for both plugins
+- **mdn-bridge** and **mdn-core**: Added `tasks.shadowJar { finalizedBy(generateSignature) }`
+  — running `shadowJar` always injects `signature.json`. No need to run `build` separately.
+- **mdn-core generateSignature**: Already had the Gradle task; just needed the `finalizedBy` link.
+- **Build output**: `[signature] mdn-bridge: <hash>`, `[signature] mdn-core: <hash>`
+
+### Velocity allowed-build-hashes support
+- **BridgeVelocityPlugin**: Now reads `allowed-build-hashes` from config (previously only BridgePaperPlugin did).
+  Both sides validate signature hashes. Added `List` import.
+- **config-velocity.yml**: Added `allowed-build-hashes` field to default template.
+- **Duplicate register removed**: BridgeVelocityPlugin accidentally called `register()` twice — fixed.
+
+### Server eviction fix
+- **CoreVelocityPlugin.discoverServers()**: No longer pre-registers servers via `serverRegistry.registerServer()`.
+  Instead logs `"N configured server(s) found — awaiting heartbeats"`.
+  Servers self-register when their first heartbeat arrives via Redis.
+  This eliminates the `"Server EVICTED: lobby (no heartbeat for 45s)"` warning before
+  the Paper server finishes booting.
+
+### Startup script rewrite
+- **server/startup.sh**: Rewritten with `setsid` + Java 25 absolute path (server JARs require Java 25),
+  Java 21 for Gradle (Gradle 8.10 doesn't support Java 25 as runtime),
+  wait-for-boot loops with timeout warnings, log capture to `/tmp/`, signal trap for cleanup.
+
+### Verified
+- Both servers running: Velocity PID 22961, Lobby PID 23026
+- Signature verified on both sides: `"Plugin 'MDN-Bridge' fully verified — signature valid, hash matches."`
+- mdn-core also now has signature.json: `"Plugin 'MDN-Core' fully verified"`
+- Handshake: SUCCESS on attempt 1
+- No eviction warnings
+
+---
+
 ## Round 4 — Dead Letter Queue & Operation Timeouts
 
 **Commit**: *(current working state)*
@@ -615,6 +652,7 @@ CircuitBreakerTest (mdn-core) — 7 tests:
 | 2026-08-04 | `81da386` | Velocity config bootstrap — saveDefaultConfig() for both plugins, config-velocity.yml now copies to disk, routing.default-region path support |
 | 2026-08-05 | `ed69f5d` | Cross-server handshake via Redis Pub/Sub + build-time signature.json generation + ClassLoader conflict fix |
 | 2026-08-05 | `de86137` | Handshake race fix (2s delay → SUCCESS on attempt 1) + signature hash fix (sorted entries + Python injection) + MDN-Core self-registration |
+| 2026-08-06 | *(pending)* | Signature auto-gen finalizedBy link for both bridge + core, Velocity allowed-build-hashes support, server eviction fix (discoverServers no longer pre-registers), startup.sh rewrite, duplicate register removed |
 
 ---
 

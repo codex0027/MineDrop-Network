@@ -55,7 +55,7 @@ public final class AltDetector {
 
         logger.debug("Alt check for {}: ip={} ({} accounts, max={}), fp={} ({} accounts, max={})",
                 playerUuid, ipAddress, ipCount, maxPerIp,
-                fingerprint != null ? fingerprint.substring(0, 12) : "null", fpCount, maxPerFp);
+                fingerprint != null ? "present" : "null", fpCount, maxPerFp);
 
         if (ipCount >= maxPerIp) {
             return Action.KICK;
@@ -91,7 +91,7 @@ public final class AltDetector {
         }
 
         logger.debug("Recorded login: uuid={}, ip={}, fp={} (TTL: {}h)",
-                playerUuid, ipAddress, fingerprint != null ? fingerprint.substring(0, 12) : "null",
+                playerUuid, ipAddress, fingerprint != null ? "present" : "null",
                 TTL_SECONDS / 3600);
     }
 

@@ -1,8 +1,8 @@
 # =============================================================================
 # MDN-Auth Configuration
 # =============================================================================
-# Handles player authentication, device fingerprinting, staff 2FA,
-# alt account detection, and private lobby service-secret validation.
+# Handles password-based authentication, device fingerprinting, staff 2FA,
+# alt account detection, session management, and account administration.
 
 # ── Redis connection ──
 redis:
@@ -10,8 +10,32 @@ redis:
   port: 6379
   password: ""
 
+# ── MySQL connection (for account persistence) ──
+mysql:
+  host: "127.0.0.1"
+  port: 3306
+  database: "minedrop"
+  user: "mdn_user"
+  password: ""
+
 # ── Authentication settings ──
 auth:
+
+  # Password policy
+  password:
+    # Minimum password length (recommended: 12 per OWASP)
+    min-length: 12
+    # Maximum password length
+    max-length: 128
+    # Whether to require password authentication in cracked/offline mode
+    require-in-cracked-mode: true
+
+  # Session settings
+  session:
+    # Session TTL in seconds (default: 30 minutes)
+    ttl-seconds: 1800
+    # Duplicate login policy: new-authenticated-session-replaces-old
+    duplicate-policy: "REPLACE_OLD"
 
   # Alt account detection
   alt-detection:
@@ -35,3 +59,6 @@ auth:
   private-lobbies:
     token-lifetime-seconds: 60
     secret-hashing-algorithm: "SHA-256"
+
+  # Login timeout: disconnect unauthenticated players after this many seconds
+  login-timeout-seconds: 120

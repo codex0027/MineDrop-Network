@@ -34,6 +34,7 @@ dependencies {
 
     implementation("com.fasterxml.jackson.core:jackson-databind:2.17.2")
     implementation("com.fasterxml.jackson.core:jackson-annotations:2.17.2")
+    implementation("de.mkammerer:argon2-jvm:2.11")
     compileOnly("org.slf4j:slf4j-api:2.0.13")  // Velocity provides SLF4J — do NOT bundle
 
     testImplementation(platform("org.junit:junit-bom:5.11.0"))

@@ -25,6 +25,9 @@ public final class DatabaseSchema {
     public static final String TABLE_FRIENDSHIPS      = "mdn_friendships";
     public static final String TABLE_SAM_PLAYER_DATA  = "mdn_sam_player_data";
     public static final String TABLE_AUTH_TOTP        = "mdn_auth_totp";
+    public static final String TABLE_ACCOUNTS         = "mdn_accounts";
+    public static final String TABLE_BACKUP_CODES     = "mdn_backup_codes";
+    public static final String TABLE_PASSWORD_RESETS  = "mdn_password_resets";
 
     // ── DDL Statements ──
 
@@ -131,6 +134,81 @@ public final class DatabaseSchema {
                     backup_codes TEXT NOT NULL,
                     ip_lock VARCHAR(45) DEFAULT NULL,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+                """,
+
+                // 9. Auth Accounts (password-based authentication)
+                """
+                CREATE TABLE IF NOT EXISTS mdn_accounts (
+                    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+                    uuid CHAR(36) NOT NULL,
+                    username VARCHAR(16) NOT NULL,
+                    status ENUM('PENDING', 'ACTIVE', 'SUSPENDED')
+                        NOT NULL DEFAULT 'PENDING',
+
+                    password_hash VARCHAR(255) NOT NULL,
+                    password_version INT NOT NULL DEFAULT 1,
+                    password_changed_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+                    registered_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    last_login_at TIMESTAMP NULL,
+                    last_ip VARCHAR(64) NULL,
+
+                    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+                        ON UPDATE CURRENT_TIMESTAMP,
+
+                    PRIMARY KEY (id),
+                    UNIQUE KEY uq_mdn_accounts_uuid (uuid),
+                    INDEX idx_mdn_accounts_username (username),
+                    INDEX idx_mdn_accounts_status (status)
+                )
+                """,
+
+                // 10. Auth Backup Codes (hashed, single-use)
+                """
+                CREATE TABLE IF NOT EXISTS mdn_backup_codes (
+                    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+                    account_id BIGINT UNSIGNED NOT NULL,
+
+                    code_hash VARCHAR(255) NOT NULL,
+                    used_at TIMESTAMP NULL,
+                    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+                    PRIMARY KEY (id),
+
+                    CONSTRAINT fk_mdn_backup_account
+                        FOREIGN KEY (account_id)
+                        REFERENCES mdn_accounts(id)
+                        ON DELETE CASCADE,
+
+                    INDEX idx_mdn_backup_account (account_id)
+                )
+                """,
+
+                // 11. Auth Password Resets (token-based recovery)
+                """
+                CREATE TABLE IF NOT EXISTS mdn_password_resets (
+                    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+                    account_id BIGINT UNSIGNED NOT NULL,
+
+                    token_hash VARCHAR(255) NOT NULL,
+                    expires_at TIMESTAMP NOT NULL,
+                    used_at TIMESTAMP NULL,
+
+                    requested_ip VARCHAR(64) NULL,
+                    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+                    PRIMARY KEY (id),
+
+                    CONSTRAINT fk_mdn_reset_account
+                        FOREIGN KEY (account_id)
+                        REFERENCES mdn_accounts(id)
+                        ON DELETE CASCADE,
+
+                    UNIQUE KEY uq_mdn_reset_token (token_hash),
+                    INDEX idx_mdn_reset_account (account_id),
+                    INDEX idx_mdn_reset_expiry (expires_at)
                 )
                 """
         );

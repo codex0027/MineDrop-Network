@@ -23,6 +23,7 @@ import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
 import net.kyori.adventure.text.format.TextDecoration;
 import net.kyori.adventure.title.Title;
+import net.minedrop.api.MDNAPI;
 import net.minedrop.bridge.BridgeManager;
 import net.minedrop.core.redis.RedisManager;
 import org.slf4j.Logger;
@@ -75,18 +76,24 @@ public final class AuthVelocityPlugin {
     // ── Config values ──
     private int maxAccountsPerIp = 3;
     private int maxAccountsPerFingerprint = 2;
-    private String altAction = "KICK"; // KICK, ALERT, SHADOW_BAN
+    private String altAction = "KICK";
     private boolean staff2faEnabled = true;
     private boolean enforceIpLock = true;
     private String totpIssuer = "MineDropNetwork";
     private List<String> force2faPermissions = List.of("mdn.group.admin", "mdn.group.staff");
     private int privateLobbyTokenLifetime = 60;
     private String secretHashingAlgorithm = "SHA-256";
+    private int loginTimeoutSeconds = 120;
 
-    // ── Redis config ──
+    // ── Redis + MySQL config ──
     private String redisHost = "127.0.0.1";
     private int redisPort = 6379;
     private String redisPassword = "";
+    private String mysqlHost = "127.0.0.1";
+    private int mysqlPort = 3306;
+    private String mysqlDatabase = "minedrop";
+    private String mysqlUser = "mdn_user";
+    private String mysqlPassword = "";
 
     @Inject
     public AuthVelocityPlugin(ProxyServer proxy, Logger logger) {
@@ -107,17 +114,20 @@ public final class AuthVelocityPlugin {
         // ── Step 3: Connect to Redis ──
         initRedis();
 
-        // ── Step 4: Initialize AuthManager ──
-        authManager = new AuthManager(redisManager, logger);
+        // ── Step 4: Initialize AuthManager with MySQL from MDN-Core ──
+        var ds = MDNAPI.getInstance() != null ? MDNAPI.getInstance().getDataSource() : null;
+        authManager = new AuthManager(redisManager, logger, ds);
         authManager.initialize();
 
         // ── Step 5: Register commands ──
         registerCommands();
 
-        // ── Step 6: Start alt list cleanup task (A-6) ──
+        // ── Step 6: Start scheduled tasks ──
         startCleanupTask();
+        startLoginTimeoutTask();
 
         logger.info("MDN-Auth enabled.");
+        logger.info("  Password auth: enabled (Argon2id, min 12 chars)");
         logger.info("  Alt limits: {} per IP, {} per fingerprint (action: {})",
                 maxAccountsPerIp, maxAccountsPerFingerprint, altAction);
         logger.info("  Staff 2FA: {} ({} permission groups, ip-lock: {})",
@@ -125,6 +135,7 @@ public final class AuthVelocityPlugin {
                 force2faPermissions.size(),
                 enforceIpLock ? "on" : "off");
         logger.info("  Redis: {}", redisManager.isConnected() ? "connected" : "DISCONNECTED");
+        logger.info("  MySQL: {}@{}:{}/{}", mysqlUser, mysqlHost, mysqlPort, mysqlDatabase);
     }
 
     @Subscribe
@@ -182,11 +193,8 @@ public final class AuthVelocityPlugin {
         String ipAddress = player.getRemoteAddress().getAddress().getHostAddress();
 
         // ── Device fingerprint ──
-        // Extract client brand from the player's game profile properties if available.
-        // Velocity doesn't expose client brand directly in the API, so we use a best-effort approach.
         String clientBrand = "unknown";
         int protocolVersion = player.getProtocolVersion().getProtocol();
-
         DeviceFingerprinter.Fingerprint fp = authManager.fingerprint(
                 uuid, ipAddress, clientBrand, protocolVersion);
 
@@ -195,71 +203,93 @@ public final class AuthVelocityPlugin {
                 uuid, ipAddress, fp.getHash(),
                 maxAccountsPerIp, maxAccountsPerFingerprint);
 
-        // ── Handle KICK or SHADOW_BAN (A-4) ──
         if (action == AltDetector.Action.KICK) {
             if ("SHADOW_BAN".equalsIgnoreCase(altAction)) {
-                // Instead of kicking, silently flag the player
                 authManager.shadowBan(uuid);
                 logger.warn("Player {} ({}) shadow-banned — allowed but flagged", username, uuid);
-                // Fall through to login recording — player is allowed
             } else {
-                // KICK action — disconnect the player
                 player.disconnect(Component.text()
                         .append(Component.text("⚠ Too many accounts", NamedTextColor.RED, TextDecoration.BOLD))
                         .append(Component.newline())
                         .append(Component.text("Maximum " + maxAccountsPerIp + " accounts per IP.", NamedTextColor.GRAY))
                         .build());
-                logger.info("Login denied for {} — alt limit (ip={}, fp={})",
-                        username, ipAddress, fp.getHash().substring(0, 12));
                 return;
             }
         }
 
         if (action == AltDetector.Action.ALERT) {
-            logger.warn("⚠ Alt alert: {} (ip={}, fp={}) is approaching alt limits",
-                    username, ipAddress, fp.getHash().substring(0, 12));
-            // TODO: Send alert to staff via Discord/chat
+            logger.warn("⚠ Alt alert: {} (ip={}) is approaching alt limits", username, ipAddress);
         }
 
-        // ── Record successful login ──
+        // ── Record login + username mapping ──
         authManager.recordLogin(uuid, ipAddress, fp.getHash());
-
-        // ── Record username→UUID mapping for offline UUID resolution (A-3) ──
         authManager.recordUsernameMapping(username, uuid);
 
-        // ── Staff 2FA check ──
-        if (staff2faEnabled) {
-            boolean requires2fa = force2faPermissions.stream()
-                    .anyMatch(player::hasPermission);
+        // ── Start auth timeout tracking ──
+        markAuthStart(uuid);
 
-            if (requires2fa) {
-                // Block input until 2FA is verified
-                authManager.lockPlayer(uuid);
-                applyPreAuthLockdown(player);
-                logger.info("Staff {} requires 2FA — locked until verified", username);
-            }
+        // ── Auth state machine ──
+        boolean isRegistered = authManager.isRegistered(uuid);
+
+        if (isRegistered) {
+            // Registered account → require password
+            applyPasswordRequiredState(player);
+            logger.info("Player {} ({}) connected — password required", username, uuid);
+        } else {
+            // New account → require registration
+            applyRegistrationRequiredState(player);
+            logger.info("Player {} ({}) connected — registration required", username, uuid);
         }
     }
 
     @Subscribe
     public void onDisconnect(DisconnectEvent event) {
         UUID uuid = event.getPlayer().getUniqueId();
+        authStartTimes.remove(uuid);
         if (authManager.isPlayerLocked(uuid)) {
             authManager.unlockPlayer(uuid);
-            logger.debug("Cleaned up pre-auth lock for disconnected player {}", uuid);
         }
+        // Revoke session + publish AUTH_UPDATE(false)
+        authManager.revokeAllSessions(uuid, "Player disconnected");
+        logger.debug("Cleaned up session for disconnected player {}", uuid);
     }
 
-    // ── Pre-auth lockdown ──
+    // ── Pre-auth states ──
 
-    /**
-     * Applies blindness effect, freezes the player in a void world, and blocks
-     * server switching until 2FA is completed.
-     * <p>
-     * Implementation: Sends a title screen overlay and prevents the player from
-     * being routed to any game server. The player stays in a "limbo" state on
-     * the proxy until they pass 2FA verification via {@code /2fa verify}.
-     */
+    /** Player must register before playing. */
+    private void applyRegistrationRequiredState(Player player) {
+        player.showTitle(Title.title(
+                Component.text("Welcome to MineDrop!", NamedTextColor.GOLD, TextDecoration.BOLD),
+                Component.text("Use /register to create your account", NamedTextColor.GRAY),
+                Title.Times.times(Duration.ofMillis(500), Duration.ofDays(1), Duration.ofMillis(500))));
+        player.sendActionBar(Component.text()
+                .append(Component.text("🔑 ", NamedTextColor.GOLD))
+                .append(Component.text("New here? Use ", NamedTextColor.YELLOW))
+                .append(Component.text("/register <password>", NamedTextColor.GOLD, TextDecoration.BOLD))
+                .build());
+    }
+
+    /** Player must enter password. */
+    private void applyPasswordRequiredState(Player player) {
+        player.showTitle(Title.title(
+                Component.text("🔒 Authentication Required", NamedTextColor.RED, TextDecoration.BOLD),
+                Component.text("Use /login <password> to authenticate", NamedTextColor.GRAY),
+                Title.Times.times(Duration.ofMillis(500), Duration.ofDays(1), Duration.ofMillis(500))));
+        player.sendActionBar(Component.text()
+                .append(Component.text("🔒 ", NamedTextColor.RED))
+                .append(Component.text("This account is registered. Use ", NamedTextColor.YELLOW))
+                .append(Component.text("/login <password>", NamedTextColor.GOLD, TextDecoration.BOLD))
+                .build());
+    }
+
+    /** Password verified, now 2FA required. */
+    public void applyTotpRequiredState(Player player) {
+        authManager.lockPlayer(player.getUniqueId());
+        applyPreAuthLockdown(player);
+    }
+
+    /** @deprecated Use {@link #applyTotpRequiredState} for new password+2FA flow. */
+    @Deprecated
     private void applyPreAuthLockdown(Player player) {
         // Send a title overlay explaining the situation
         player.showTitle(Title.title(
@@ -302,14 +332,20 @@ public final class AuthVelocityPlugin {
     }
 
     /**
-     * Removes the pre-auth lockdown state after successful 2FA verification.
-     * Called by {@code TwoFactorCommand} on successful verification.
+     * Called after successful authentication (password-only or password+2FA).
+     * Creates session, publishes AUTH_UPDATE, routes to lobby.
      */
     public void removeLockdown(Player player) {
-        // Clear the title
-        player.clearTitle();
+        UUID uuid = player.getUniqueId();
+        String ip = player.getRemoteAddress().getAddress().getHostAddress();
 
-        // Send welcome message
+        // Clear timeout tracker
+        markAuthComplete(uuid);
+
+        // Create authenticated session + publish AUTH_UPDATE(true)
+        authManager.createAuthenticatedSession(uuid, ip);
+
+        player.clearTitle();
         player.sendMessage(Component.text());
         player.sendMessage(Component.text()
                 .append(Component.text("✓ ", NamedTextColor.GREEN, TextDecoration.BOLD))
@@ -317,7 +353,6 @@ public final class AuthVelocityPlugin {
                 .build());
         player.sendMessage(Component.text());
 
-        // Route to lobby
         routeToLobby(player);
     }
 
@@ -385,6 +420,16 @@ public final class AuthVelocityPlugin {
                 redisPassword = String.valueOf(redis.getOrDefault("password", redisPassword));
             }
 
+            // Parse MySQL config
+            Map<String, Object> mysql = (Map<String, Object>) root.get("mysql");
+            if (mysql != null) {
+                mysqlHost = String.valueOf(mysql.getOrDefault("host", mysqlHost));
+                mysqlPort = parseInt(mysql.get("port"), mysqlPort);
+                mysqlDatabase = String.valueOf(mysql.getOrDefault("database", mysqlDatabase));
+                mysqlUser = String.valueOf(mysql.getOrDefault("user", mysqlUser));
+                mysqlPassword = String.valueOf(mysql.getOrDefault("password", mysqlPassword));
+            }
+
             // Parse auth config
             Map<String, Object> auth = (Map<String, Object>) root.get("auth");
             if (auth != null) {
@@ -414,6 +459,9 @@ public final class AuthVelocityPlugin {
                     privateLobbyTokenLifetime = parseInt(privateLobbies.get("token-lifetime-seconds"), privateLobbyTokenLifetime);
                     secretHashingAlgorithm = String.valueOf(privateLobbies.getOrDefault("secret-hashing-algorithm", secretHashingAlgorithm));
                 }
+
+                // Login timeout
+                loginTimeoutSeconds = parseInt(auth.get("login-timeout-seconds"), loginTimeoutSeconds);
             }
 
             logger.info("Config loaded: redis={}:{}, alt-limits={}/{}",
@@ -438,7 +486,27 @@ public final class AuthVelocityPlugin {
     private void registerCommands() {
         CommandManager cmd = proxy.getCommandManager();
 
-        // /2fa — Two-factor authentication with IP lock enforcement (A-2) + backup codes (A-5)
+        // /register — Create new MDN account
+        cmd.register(
+                cmd.metaBuilder("register")
+                        .plugin(this)
+                        .build(),
+                authManager.createRegisterCommand(this::removeLockdown)
+        );
+
+        // /login — Password authentication (passes force-2FA checker for staff bypass prevention)
+        cmd.register(
+                cmd.metaBuilder("login")
+                        .plugin(this)
+                        .build(),
+                authManager.createLoginCommand(
+                        this::removeLockdown,
+                        this::applyTotpRequiredState,
+                        player -> force2faPermissions.stream().anyMatch(player::hasPermission)
+                )
+        );
+
+        // /2fa — Two-factor authentication
         cmd.register(
                 cmd.metaBuilder("2fa")
                         .plugin(this)
@@ -450,20 +518,24 @@ public final class AuthVelocityPlugin {
                 )
         );
 
-        // /auth — Auth admin commands
+        // /auth — Admin commands (unblock, clear, suspend, unsuspend)
+        // Pass player resolver for suspend/unsuspend username resolution
         cmd.register(
                 cmd.metaBuilder("auth")
                         .plugin(this)
                         .build(),
-                authManager.createAuthCommand()
+                authManager.createAuthCommand(
+                        name -> proxy.getPlayer(name)
+                )
         );
 
-        logger.info("Commands registered: /2fa (setup|verify|verify-backup|reset), /auth (unblock)");
+        logger.info("Commands: /register, /login, /2fa, /auth");
     }
 
     // ── Alt list cleanup (A-6) ──
 
     private ScheduledExecutorService cleanupScheduler;
+    private final java.util.Map<UUID, Long> authStartTimes = new ConcurrentHashMap<>();
 
     private void startCleanupTask() {
         cleanupScheduler = Executors.newSingleThreadScheduledExecutor(r -> {
@@ -483,6 +555,42 @@ public final class AuthVelocityPlugin {
         }, 6, 6, TimeUnit.HOURS);
 
         logger.info("Alt list cleanup task scheduled (every 6h)");
+    }
+
+    /** Disconnects players who haven't authenticated within the timeout window (spec §119). */
+    private void startLoginTimeoutTask() {
+        proxy.getScheduler().buildTask(this, () -> {
+            long now = System.currentTimeMillis();
+            long timeoutMs = loginTimeoutSeconds * 1000L;
+            var iter = authStartTimes.entrySet().iterator();
+            while (iter.hasNext()) {
+                var entry = iter.next();
+                if (now - entry.getValue() > timeoutMs) {
+                    UUID uuid = entry.getKey();
+                    proxy.getPlayer(uuid).ifPresent(player -> {
+                        if (!authManager.hasActiveSession(uuid)) {
+                            player.disconnect(Component.text()
+                                    .append(Component.text("⏰ Authentication Timeout", NamedTextColor.RED, TextDecoration.BOLD))
+                                    .append(Component.newline())
+                                    .append(Component.text("You took too long to authenticate. Please reconnect.", NamedTextColor.GRAY))
+                                    .build());
+                            logger.info("Disconnected {} for auth timeout ({}s)", player.getUsername(), loginTimeoutSeconds);
+                        }
+                    });
+                    iter.remove();
+                }
+            }
+        }).repeat(5, java.util.concurrent.TimeUnit.SECONDS).schedule();
+    }
+
+    /** Records when a player entered the auth flow (for timeout tracking). */
+    private void markAuthStart(UUID uuid) {
+        authStartTimes.put(uuid, System.currentTimeMillis());
+    }
+
+    /** Removes the timeout tracker on successful auth. */
+    private void markAuthComplete(UUID uuid) {
+        authStartTimes.remove(uuid);
     }
 
     // ── Helpers ──

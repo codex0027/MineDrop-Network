@@ -4,11 +4,17 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.zaxxer.hikari.HikariDataSource;
 import net.minedrop.auth.command.AuthCommand;
+import net.minedrop.auth.command.LoginCommand;
+import net.minedrop.auth.command.RegisterCommand;
 import net.minedrop.auth.command.TwoFactorCommand;
 import net.minedrop.bridge.BridgeManager;
 import net.minedrop.core.redis.RedisManager;
 import org.slf4j.Logger;
 
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.SQLException;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
@@ -27,9 +33,12 @@ public final class AuthManager {
     private final TotpManager totpManager;
     private final DeviceFingerprinter deviceFingerprinter;
     private final AltDetector altDetector;
+    private final PasswordHasher passwordHasher;
+    private final SessionManager sessionManager;
     private final RedisManager redisManager;
     private final ObjectMapper objectMapper;
     private final Logger logger;
+    private final HikariDataSource dataSource;
 
     /** Players currently locked awaiting 2FA (UUID → true). In-memory for speed. */
     private final Map<UUID, Boolean> lockedPlayers = new ConcurrentHashMap<>();
@@ -45,6 +54,9 @@ public final class AuthManager {
         this.redisManager = redisManager;
         this.logger = logger;
         this.objectMapper = new ObjectMapper();
+        this.dataSource = dataSource;
+        this.passwordHasher = new PasswordHasher(logger);
+        this.sessionManager = new SessionManager(redisManager, objectMapper, logger);
         this.totpManager = new TotpManager(redisManager, objectMapper, logger, dataSource);
         this.deviceFingerprinter = new DeviceFingerprinter();
         this.altDetector = new AltDetector(redisManager, logger);
@@ -62,6 +74,8 @@ public final class AuthManager {
     /** Clean shutdown. */
     public void shutdown() {
         lockedPlayers.clear();
+        passwordHasher.shutdown();
+        sessionManager.shutdown();
         totpManager.shutdown();
         altDetector.shutdown();
         logger.info("AuthManager shut down.");
@@ -204,6 +218,280 @@ public final class AuthManager {
                 || "true".equals(redisManager.get("mdn:auth:locked:" + playerUuid));
     }
 
+    // ── Account management (password-based auth) ──
+
+    /**
+     * Checks whether an MDN account exists for this UUID.
+     */
+    public boolean isRegistered(UUID playerUuid) {
+        if (dataSource == null || dataSource.isClosed()) return false;
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                 "SELECT 1 FROM mdn_accounts WHERE uuid = ?")) {
+            ps.setString(1, playerUuid.toString());
+            try (ResultSet rs = ps.executeQuery()) {
+                return rs.next();
+            }
+        } catch (SQLException e) {
+            logger.debug("Account lookup for {} failed (DB unavailable): {}", playerUuid, e.getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * Registers a new MDN account with Argon2id password hash.
+     */
+    public RegistrationResult register(UUID playerUuid, String username, char[] password, String ip) {
+        if (dataSource == null || dataSource.isClosed()) {
+            return RegistrationResult.DATABASE_ERROR;
+        }
+
+        // Check for duplicate
+        if (isRegistered(playerUuid)) {
+            return RegistrationResult.ALREADY_REGISTERED;
+        }
+
+        String hash = passwordHasher.hash(password);
+        if (hash == null) {
+            return RegistrationResult.DATABASE_ERROR;
+        }
+
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                 "INSERT INTO mdn_accounts (uuid, username, status, password_hash, last_ip) " +
+                 "VALUES (?, ?, 'ACTIVE', ?, ?)")) {
+            ps.setString(1, playerUuid.toString());
+            ps.setString(2, username);
+            ps.setString(3, hash);
+            ps.setString(4, ip);
+            ps.executeUpdate();
+            logger.info("Account registered: {} ({})", username, playerUuid);
+            return RegistrationResult.SUCCESS;
+        } catch (SQLException e) {
+            // Check for duplicate key violation
+            if (e.getMessage() != null && e.getMessage().contains("Duplicate")) {
+                return RegistrationResult.ALREADY_REGISTERED;
+            }
+            logger.error("Failed to register account for {}", playerUuid, e);
+            return RegistrationResult.DATABASE_ERROR;
+        }
+    }
+
+    /**
+     * Verifies a password against the stored Argon2id hash.
+     */
+    public LoginResult verifyPassword(UUID playerUuid, char[] password, String ip) {
+        if (dataSource == null || dataSource.isClosed()) {
+            return LoginResult.DATABASE_ERROR;
+        }
+
+        // Check rate limit
+        if (isLoginRateLimited(playerUuid, ip)) {
+            return LoginResult.RATE_LIMITED;
+        }
+
+        // Load account
+        String storedHash = null;
+        String status = null;
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                 "SELECT password_hash, status FROM mdn_accounts WHERE uuid = ?")) {
+            ps.setString(1, playerUuid.toString());
+            try (ResultSet rs = ps.executeQuery()) {
+                if (rs.next()) {
+                    storedHash = rs.getString("password_hash");
+                    status = rs.getString("status");
+                }
+            }
+        } catch (SQLException e) {
+            logger.error("Failed to load account for {}", playerUuid, e);
+            return LoginResult.DATABASE_ERROR;
+        }
+
+        if (storedHash == null) {
+            return LoginResult.INVALID_CREDENTIALS;
+        }
+
+        // Check account status
+        if ("SUSPENDED".equals(status)) {
+            return LoginResult.ACCOUNT_SUSPENDED;
+        }
+
+        // Verify password
+        if (!passwordHasher.verify(storedHash, password)) {
+            return LoginResult.INVALID_CREDENTIALS;
+        }
+
+        // Update last login
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                 "UPDATE mdn_accounts SET last_login_at = NOW(), last_ip = ? WHERE uuid = ?")) {
+            ps.setString(1, ip);
+            ps.setString(2, playerUuid.toString());
+            ps.executeUpdate();
+        } catch (SQLException e) {
+            logger.warn("Failed to update last_login for {}", playerUuid, e);
+        }
+
+        return LoginResult.SUCCESS;
+    }
+
+    /**
+     * Checks whether 2FA is required for this player.
+     * True if: player has TOTP configured OR is in a force-2FA permission group.
+     *
+     * @param playerUuid          the player's UUID
+     * @param hasForcePermission  function that returns true if player has a force-2FA permission
+     */
+    public boolean isTotpRequired(UUID playerUuid, java.util.function.BooleanSupplier hasForcePermission) {
+        return hasTotpConfigured(playerUuid) || hasForcePermission.getAsBoolean();
+    }
+
+    /**
+     * Creates an authenticated session and publishes AUTH_UPDATE.
+     */
+    public SessionManager.Session createAuthenticatedSession(UUID playerUuid, String ip) {
+        SessionManager.Session session = sessionManager.createSession(playerUuid, ip);
+        if (session != null) {
+            sessionManager.publishAuthUpdate(playerUuid, true);
+        }
+        return session;
+    }
+
+    /**
+     * Checks if a player has an active authenticated session.
+     */
+    public boolean hasActiveSession(UUID playerUuid) {
+        return sessionManager.hasActiveSession(playerUuid);
+    }
+
+    /**
+     * Revokes all sessions for a player (used on password change/reset/suspend).
+     */
+    public void revokeAllSessions(UUID playerUuid, String reason) {
+        sessionManager.revokeAllSessions(playerUuid, reason);
+        sessionManager.publishAuthUpdate(playerUuid, false);
+    }
+
+    // ── Login rate limiting ──
+
+    private static final String RATE_LOGIN_KEY = "mdn:auth:rate:login:";
+    private static final String RATE_LOGIN_IP_KEY = "mdn:auth:rate:login-ip:";
+    private static final int MAX_LOGIN_FAILURES = 5;
+    private static final int LOGIN_FAILURE_TTL = 300; // 5 min
+
+    public boolean isLoginRateLimited(UUID playerUuid, String ip) {
+        String uuidCount = redisManager.get(RATE_LOGIN_KEY + playerUuid);
+        String ipCount = redisManager.get(RATE_LOGIN_IP_KEY + ip);
+        int uuidFails = uuidCount != null ? Integer.parseInt(uuidCount) : 0;
+        int ipFails = ipCount != null ? Integer.parseInt(ipCount) : 0;
+        return uuidFails >= MAX_LOGIN_FAILURES || ipFails >= MAX_LOGIN_FAILURES;
+    }
+
+    public void recordFailedLogin(UUID playerUuid, String ip) {
+        incrementRate(RATE_LOGIN_KEY + playerUuid, LOGIN_FAILURE_TTL);
+        incrementRate(RATE_LOGIN_IP_KEY + ip, LOGIN_FAILURE_TTL);
+    }
+
+    private void incrementRate(String key, int ttl) {
+        String val = redisManager.get(key);
+        int count = val != null ? Integer.parseInt(val) : 0;
+        redisManager.setWithExpiry(key, String.valueOf(count + 1), ttl);
+    }
+
+    // ── Account suspension ──
+
+    /**
+     * Suspends an account — prevents login, revokes sessions.
+     */
+    public boolean suspendAccount(UUID playerUuid, String reason) {
+        if (dataSource == null || dataSource.isClosed()) return false;
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                 "UPDATE mdn_accounts SET status = 'SUSPENDED' WHERE uuid = ?")) {
+            ps.setString(1, playerUuid.toString());
+            int rows = ps.executeUpdate();
+            if (rows > 0) {
+                revokeAllSessions(playerUuid, "Account suspended: " + reason);
+                logger.warn("Account suspended: {} — {}", playerUuid, reason);
+                return true;
+            }
+            return false;
+        } catch (SQLException e) {
+            logger.error("Failed to suspend account {}", playerUuid, e);
+            return false;
+        }
+    }
+
+    /**
+     * Unsuspends an account.
+     */
+    public boolean unsuspendAccount(UUID playerUuid) {
+        if (dataSource == null || dataSource.isClosed()) return false;
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                 "UPDATE mdn_accounts SET status = 'ACTIVE' WHERE uuid = ?")) {
+            ps.setString(1, playerUuid.toString());
+            int rows = ps.executeUpdate();
+            if (rows > 0) {
+                logger.info("Account unsuspended: {}", playerUuid);
+                return true;
+            }
+            return false;
+        } catch (SQLException e) {
+            logger.error("Failed to unsuspend account {}", playerUuid, e);
+            return false;
+        }
+    }
+
+    /**
+     * Changes a password (requires current password).
+     */
+    public boolean changePassword(UUID playerUuid, char[] currentPassword, char[] newPassword) {
+        if (dataSource == null || dataSource.isClosed()) return false;
+
+        // Verify current password first
+        String storedHash = null;
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                 "SELECT password_hash FROM mdn_accounts WHERE uuid = ? AND status = 'ACTIVE'")) {
+            ps.setString(1, playerUuid.toString());
+            try (ResultSet rs = ps.executeQuery()) {
+                if (rs.next()) {
+                    storedHash = rs.getString("password_hash");
+                }
+            }
+        } catch (SQLException e) {
+            logger.error("Failed to load password for change: {}", playerUuid, e);
+            return false;
+        }
+
+        if (storedHash == null || !passwordHasher.verify(storedHash, currentPassword)) {
+            return false;
+        }
+
+        // Hash and update new password
+        String newHash = passwordHasher.hash(newPassword);
+        if (newHash == null) return false;
+
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                 "UPDATE mdn_accounts SET password_hash = ?, password_changed_at = NOW(), password_version = password_version + 1 WHERE uuid = ?")) {
+            ps.setString(1, newHash);
+            ps.setString(2, playerUuid.toString());
+            int rows = ps.executeUpdate();
+            if (rows > 0) {
+                revokeAllSessions(playerUuid, "Password changed — all sessions revoked");
+                logger.info("Password changed for {}", playerUuid);
+                return true;
+            }
+            return false;
+        } catch (SQLException e) {
+            logger.error("Failed to update password for {}", playerUuid, e);
+            return false;
+        }
+    }
+
     // ── Device fingerprinting ──
 
     /**
@@ -294,6 +582,7 @@ public final class AuthManager {
 
     public TotpManager getTotpManager() { return totpManager; }
     public AltDetector getAltDetector() { return altDetector; }
+    public SessionManager getSessionManager() { return sessionManager; }
     public Map<UUID, Boolean> getLockedPlayers() { return lockedPlayers; }
 
     /** Creates the {@link TwoFactorCommand} wired to this manager, with post-verify callback + proxy access. */
@@ -304,8 +593,40 @@ public final class AuthManager {
         return new TwoFactorCommand(this, logger, onVerified, playerResolver, enforceIpLock);
     }
 
-    /** Creates the {@link AuthCommand} wired to this manager. */
-    public AuthCommand createAuthCommand() {
-        return new AuthCommand(this, logger);
+    /** Creates the {@link AuthCommand} wired to this manager, with player resolver for suspend/unsuspend. */
+    public AuthCommand createAuthCommand(
+            java.util.function.Function<String, Optional<com.velocitypowered.api.proxy.Player>> playerResolver) {
+        return new AuthCommand(this, logger, playerResolver);
+    }
+
+    /** Creates the {@link RegisterCommand} with post-auth callback. */
+    public RegisterCommand createRegisterCommand(
+            java.util.function.Consumer<com.velocitypowered.api.proxy.Player> onAuthenticated) {
+        return new RegisterCommand(this, logger, onAuthenticated);
+    }
+
+    /** Creates the {@link LoginCommand} with post-auth + post-password-verify + 2FA check callbacks. */
+    public LoginCommand createLoginCommand(
+            java.util.function.Consumer<com.velocitypowered.api.proxy.Player> onAuthenticated,
+            java.util.function.Consumer<com.velocitypowered.api.proxy.Player> onPasswordVerified,
+            java.util.function.Predicate<com.velocitypowered.api.proxy.Player> isForce2fa) {
+        return new LoginCommand(this, logger, onAuthenticated, onPasswordVerified, isForce2fa);
+    }
+
+    // ── Result enums ──
+
+    public enum RegistrationResult {
+        SUCCESS,
+        ALREADY_REGISTERED,
+        ACCOUNT_SUSPENDED,
+        DATABASE_ERROR
+    }
+
+    public enum LoginResult {
+        SUCCESS,
+        INVALID_CREDENTIALS,
+        ACCOUNT_SUSPENDED,
+        RATE_LIMITED,
+        DATABASE_ERROR
     }
 }

@@ -2,7 +2,7 @@
 
 > **Purpose**: Every single change — no matter how small — is logged here chronologically.  
 > **For**: New developers onboarding, debugging "why was this done this way", and auditing changes.  
-> **Last Updated**: August 11, 2026 — all 7 MDN-Auth gaps fixed + production hardened
+> **Last Updated**: August 11, 2026 — Password auth system + /auth clear + COMMANDS.md
 
 ---
 
@@ -813,6 +813,117 @@ Tested on Velocity 4.1.0 + Paper 26.2 test servers:
 
 ---
 
+## Phase 13 — Cracked-Mode Password Authentication System (Commit: `a32ddaa`)
+
+### Step 13.1 — Database Schema Expansion
+
+| # | Change | File | Details |
+|---|--------|------|---------|
+| 135 | 3 new tables | `DatabaseSchema.java` | `mdn_accounts` (uuid, username, status ENUM, password_hash, password_version, timestamps), `mdn_backup_codes` (code_hash, single-use, FK→accounts), `mdn_password_resets` (token_hash, expiry, FK→accounts) |
+
+### Step 13.2 — Argon2id Password Hashing
+
+| # | Change | File | Details |
+|---|--------|------|---------|
+| 136 | PasswordHasher | `PasswordHasher.java` | `de.mkammerer:argon2-jvm:2.11`, Argon2id with 64 MiB/3 iterations/2 parallelism. `char[]` API with auto-clear (`Arrays.fill(data, '\0')`). `hash()` returns `$argon2id$v=19$...` encoded string. `verify()` checks against stored hash. `needsUpgrade()` for future parameter changes. |
+| 137 | Argon2 dependency | `build.gradle.kts` | Added `de.mkammerer:argon2-jvm:2.11` implementation dependency |
+
+### Step 13.3 — Session Management with AUTH_UPDATE
+
+| # | Change | File | Details |
+|---|--------|------|---------|
+| 138 | SessionManager | `SessionManager.java` | Redis-backed sessions (30-min TTL). Cryptographically random session IDs (32 bytes, Base64URL). `createSession()` → revoke old → store new → `publishAuthUpdate(true)`. `revokeAllSessions()` on disconnect/password change/suspend. Login lock: ConcurrentHashMap + Redis dual-layer (prevents TOCTOU race). Session states: AUTHENTICATED. |
+
+### Step 13.4 — /register Command
+
+| # | Change | File | Details |
+|---|--------|------|---------|
+| 139 | RegisterCommand | `RegisterCommand.java` | `/register <password>` — 12-char minimum, 128 max, username-as-password rejection, common password rejection. Validates → Argon2id hash → INSERT into `mdn_accounts` with ACTIVE status → auto-authenticate. Help text with registration instructions. No permission required. |
+
+### Step 13.5 — /login Command
+
+| # | Change | File | Details |
+|---|--------|------|---------|
+| 140 | LoginCommand | `LoginCommand.java` | `/login <password>` — loads hash from MySQL → Argon2id verify → check account status → if 2FA configured → TOTP_REQUIRED state → else → create session + AUTH_UPDATE(true) → lobby. Rate limiting: 5 fails/5 min per UUID+IP. Generic error messages (no account enumeration). Account suspension check. |
+
+### Step 13.6 — AuthManager Account Management
+
+| # | Change | File | Details |
+|---|--------|------|---------|
+| 141 | Account operations | `AuthManager.java` | Added: `isRegistered()`, `register()`, `verifyPassword()`, `isTotpRequired()` (now checks force-2FA permissions), `createAuthenticatedSession()`, `hasActiveSession()`, `revokeAllSessions()`, `isLoginRateLimited()`, `recordFailedLogin()`, `suspendAccount()`, `unsuspendAccount()`, `changePassword()`. `RegistrationResult` + `LoginResult` enums. `PasswordHasher` + `SessionManager` subsystems. MySQL datasource wired. |
+
+### Step 13.7 — AuthVelocityPlugin State Machine
+
+| # | Change | File | Details |
+|---|--------|------|---------|
+| 142 | Auth state machine | `AuthVelocityPlugin.java` | `onLogin()` now checks `isRegistered()` → applies registration-required or password-required state. `applyRegistrationRequiredState()` shows title + action bar prompting /register. `applyPasswordRequiredState()` prompts /login. `applyTotpRequiredState()` locks for 2FA. `removeLockdown()` now creates session + publishes AUTH_UPDATE. Login timeout task disconnects after 120s. MySQL config loading. MDNAPI datasource wiring. |
+| 143 | Command registration | `AuthVelocityPlugin.java` | `/register`, `/login`, `/2fa`, `/auth` — all 4 registered. `/login` passes force-2FA checker for staff bypass prevention. `/auth` passes player resolver for suspend/unsuspend. |
+
+### Step 13.8 — /auth suspend + unsuspend
+
+| # | Change | File | Details |
+|---|--------|------|---------|
+| 144 | Account suspension | `AuthCommand.java` | `/auth suspend <player>` — resolves UUID via playerResolver → sets SUSPENDED in MySQL → revokes all sessions → publishes AUTH_UPDATE(false). `/auth unsuspend <player>` — sets ACTIVE. Permission upgraded to `mdn.auth.admin`. Player resolver wired from AuthVelocityPlugin. |
+
+### Step 13.9 — Config Updates
+
+| # | Change | File | Details |
+|---|--------|------|---------|
+| 145 | Expanded config | `config.yml` | Added `mysql` section (host, port, database, user, password). Added `auth.password` (min-length: 12, max-length: 128, require-in-cracked-mode). Added `auth.session` (ttl-seconds: 1800, duplicate-policy: REPLACE_OLD). Added `auth.login-timeout-seconds: 120`. |
+
+### Step 13.10 — Code Review Fixes
+
+Issues caught by code-reviewer-deepseek and fixed before commit:
+
+| # | Issue | Fix |
+|---|-------|-----|
+| CR-4 | Staff 2FA bypass — `isTotpRequired()` only checked TOTP config, not permissions | Added `BooleanSupplier hasForcePermission` parameter — now checks both |
+| CR-5 | Login lock TOCTOU race — `get()` then `setWithExpiry()` not atomic | Added `ConcurrentHashMap<UUID, String>` for in-memory fast-path check + Redis for cross-proxy safety |
+| CR-6 | AuthCommand can't find online players — resolver always returned empty | Wired `createAuthCommand(playerResolver)` — Velocity ProxyServer now resolves online players |
+| CR-7 | Fingerprint `substring(0,12)` still in AltDetector debug logs | Changed to `"present"` per spec §124 |
+| CR-8 | AuthCommand permissions too broad — `mdn.auth.admin.unblock` also grants suspend | Added `mdn.auth.admin` permission check |
+| CR-9 | No login timeout enforcement | Added `startLoginTimeoutTask()` — Velocity scheduler, 5s interval, disconnects after configurable seconds |
+
+### Step 13.11 — Build Verification
+
+```
+mdn-auth:compileJava ✅ (deprecation warning only)
+mdn-auth:shadowJar ✅ (4.0MB, signature: 75b60a2f...)
+mdn-api:build ✅
+mdn-bridge:build ✅
+mdn-core:build ✅
+All 4 plugins build + signature verified ✅
+```
+
+---
+
+## Phase 14 — /auth clear + Documentation Update (Commits: `bd27a16` + upcoming)
+
+### Step 14.1 — /auth clear <ip> Command
+
+| # | Change | File | Details |
+|---|--------|------|---------|
+| 146 | AltDetector.clearIp() | `AltDetector.java` | Deletes `mdn:auth:alt:ip:<ip>` key + `mdn:auth:unblocked:<ip>` whitelist entry. Returns UUID count for feedback. |
+| 147 | AuthCommand.handleClear() | `AuthCommand.java` | `/auth clear <ip>` — IPv4 validation, calls clearIp(), shows count. Difference from unblock: clear WIPES data; unblock only WHITELISTS. |
+
+### Step 14.2 — COMMANDS.md
+
+| # | Change | File | Details |
+|---|--------|------|---------|
+| 148 | Command reference | `documents/COMMANDS.md` | Complete reference: all 13 commands across mdn-core (10) + mdn-auth (10), with permissions, platforms, usage examples, error messages, flow diagrams. Command index by permission and by plugin. |
+
+### Step 14.3 — All Docs Updated
+
+| # | Change | Files | Details |
+|---|--------|-------|---------|
+| 149 | Phase 13 + 14 sections | `STEPS.md` | This section |
+| 150 | Phase 13 + 14 entries | `TIMELINE.md` | Updated timeline, renumbered future phases (15-17), updated metrics |
+| 151 | Round 11 section | `DIARY.md` | Password auth implementation + /auth clear + commands.md |
+| 152 | Updated suggestions | `SUGGEST.md` | Moved suggestions to Implemented |
+| 153 | Updated status | `ISSUES.md` | Resolved issues marked, new known gaps added |
+
+---
+
 ## Summary Statistics
 
 ### By Phase
@@ -831,24 +942,6 @@ Tested on Velocity 4.1.0 + Paper 26.2 test servers:
 | Phase 10 (Race + Hash Fixes) | 1 | 0 | 5 | 0 |
 | Phase 11 (MDN-Auth Plugin #4) | 1 | 8 | 8 | 0 |
 | Phase 12 (MDN-Auth Gap Fixes) | 1 | 0 | 7 | 0 |
-| **Total** | **14** | **102** | **67** | **12** |
-
-*Phase 2 was bundled with Phase 1 commit
-
-### By Plugin
-| Plugin | Source Files | Test Files | Config Files | Total |
-|--------|-------------|------------|-------------|-------|
-| mdn-api | 15 | 2 | 1 | 18 |
-| mdn-bridge | 5 | 0 | 2 | 7 |
-| mdn-core | 15 | 1 | 2 | 18 |
-| mdn-auth | 7 | 0 | 1 | 8 |
-| mdn-core (RedisManager) | 1 | 0 | 0 | 1 |
-| 7 skeletons | 14 | 0 | 0 | 14 |
-| Root docs | DIARY, STEPS, SUGGEST, TIMELINE, README, DEPLOY, FIX-GUIDE, ISSUES | — | — | 8 |
-| **Total** | **57** | **3** | **4** | **72** |
-
-*Note: Two config files (velocity-plugin.json) were removed in Phase 7 — Velocity metadata is now 100% annotation-driven. Phase 8 connected the existing Velocity config files to the startup bootstrap — plugins now create data dirs and copy defaults on first run.*
-
----
-
-*This file is updated every time any change is made. No change is too small to log.*
+| Phase 13 (Password Auth System) | 1 | 4 | 7 | 1 |
+| Phase 14 (Commands + Docs) | 2 | 1 | 8 | 0 |
+| **Total** | **17** | **107** | **82** | **13** |

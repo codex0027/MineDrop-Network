@@ -2,7 +2,7 @@
 
 > **Purpose**: Every idea, suggestion, and enhancement — whether implemented, planned, or deferred — is cataloged here.  
 > **For**: Future planning, prioritizing work, and ensuring no good idea gets lost.  
-> **Last Updated**: August 11, 2026 — all 7 MDN-Auth gap suggestions (#53-#59) now implemented
+> **Last Updated**: August 11, 2026 — Password auth system implemented, COMMANDS.md created
 
 ---
 
@@ -196,4 +196,4 @@ Ideas considered but decided against (with reasons).
 
 ---
 
-*Last updated: August 11, 2026 — 59 suggestions cataloged (42 implemented, 1 planned, 10 future, 2 rejected)*
+*Last updated: August 11, 2026 — 61 suggestions cataloged (47 implemented, 0 planned, 12 future, 2 rejected)*

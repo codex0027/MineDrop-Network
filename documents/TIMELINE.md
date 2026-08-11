@@ -1,7 +1,7 @@
 # MineDrop Network — Development Timeline
 
 > **Purpose**: Visual roadmap of everything we've built, are building, and will build.  
-> **Last Updated**: August 11, 2026 — all 7 MDN-Auth gaps fixed + production hardened
+> **Last Updated**: August 11, 2026 — Password auth system + /auth clear + COMMANDS.md
 
 ---
 
@@ -15,8 +15,13 @@ Foundation →  Startup Fix →  JSON+Config →  Handshake+Sig →  MDN-Auth #4
  (6.5 hours)   (2.5 hours)     (50 min)      (3 hours)        (2 hours)      (1.5 hours)
     ✅ Done       ✅ Done         ✅ Done        ✅ Done          ✅ Done         ✅ Done
 
+         [Phase 13]         [Phase 14]
+    Password Auth →  Commands+Docs
+      (3 hours)        (30 min)
+        ✅ Done          ✅ Done
+
                                                                               ▼
-                                                                     [Phase 13] ───► [Phase 14]
+                                                                     [Phase 15] ───► [Phase 16]
                                                                       Planned         Dreams
 ```
 
@@ -321,7 +326,55 @@ Status: ✅ All 7 gaps fixed, mdn-auth production-ready
 
 ---
 
-## 🔜 Upcoming — Phase 13 (Planned)
+### Phase 13 — Password Authentication System
+**Duration**: ~3 hours  
+**Date**: August 11, 2026  
+**Commit**: `a32ddaa` (11 files, +1353/-67)
+
+```
+Major features:
+  ✅ Argon2id password hashing  (64 MiB, 3 iterations, char[] API, auto-clear)
+  ✅ mdn_accounts table         (uuid, status, password_hash, timestamps)
+  ✅ /register command           (12-char min, validation, auto-auth)
+  ✅ /login command              (rate-limited, 2FA transition, suspend check)
+  ✅ SessionManager              (Redis sessions, AUTH_UPDATE, login locks)
+  ✅ /auth suspend|unsuspend     (account admin commands)
+  ✅ Auth state machine          (register→password→2FA→authenticated)
+  ✅ Login timeout               (120s disconnect for abandoned connections)
+
+New files: PasswordHasher.java, SessionManager.java, RegisterCommand.java, LoginCommand.java
+Modified: AuthManager (+327), AuthVelocityPlugin (+208), AuthCommand (+95),
+          DatabaseSchema (+78), config.yml, build.gradle.kts
+
+Code review fixes:
+  ✅ Staff 2FA bypass fixed     (isTotpRequired now checks force-2fa permissions)
+  ✅ Login lock race fixed      (ConcurrentHashMap + Redis dual-layer)
+  ✅ AuthCommand resolver       (playerResolver wired for online player lookup)
+  ✅ Fingerprint safety         (substring→"present" in AltDetector logs)
+  ✅ Permissions tightened      (mdn.auth.admin for suspend, separate from unblock)
+
+Status: ✅ All 4 plugins building, 13 total commands registered
+```
+
+---
+
+### Phase 14 — /auth clear + Commands Reference
+**Duration**: ~30 minutes  
+**Date**: August 11, 2026  
+**Commits**: `bd27a16` (3 files, +69/-2), upcoming (docs)
+
+```
+New commands + docs:
+  ✅ /auth clear <ip>           (wipes alt tracking data + removes whitelist)
+  ✅ COMMANDS.md                (13 commands, permissions, usage, flow diagrams)
+  ✅ All 5 docs updated         (STEPS, TIMELINE, DIARY, SUGGEST, ISSUES)
+
+Status: ✅ Documentation complete — 9 markdown files in documents/
+```
+
+---
+
+## 🔜 Upcoming — Phase 15 (Planned)
 
 **Target**: Next development session  
 **Focus**: MDN-Security plugin #5 — Anti-cheat & exploit prevention
@@ -337,7 +390,7 @@ Estimated effort: 2-3 hours
 
 ---
 
-## 📋 Phase 14 — Future (Medium Term)
+## 📋 Phase 16 — Future (Medium Term)
 
 **Focus**: Rate Limiting + Graceful Degradation + Monitoring
 
@@ -356,7 +409,7 @@ Estimated effort: 4-6 hours
 
 ---
 
-## 🌟 Phase 15 — Dreams (Long Term)
+## 🌟 Phase 17 — Dreams (Long Term)
 
 **Focus**: Scale + High Availability
 
@@ -377,17 +430,19 @@ Estimated effort: 8-12 hours (spread across weeks)
 
 | Metric | Count |
 |--------|-------|
-| Total commits | 14 |
+| Total commits | 17 |
 | Total files created | 94 |
 | Total source lines | ~5,700 |
 | Total test lines | ~400 |
 | Build errors encountered & fixed | 13 |
 | Unit tests passing | 24/24 |
 | Plugins fully implemented | 4 (mdn-api, mdn-bridge, mdn-core, mdn-auth) |
+| Plugins as skeletons | 6 |
 | Issues fixed (all time) | 53 |
 | Suggestions cataloged | 59 |
 | Spec comparison gaps | 0 (all 7 fixed) |
-| Documentation pages | 8 (README + 7 docs in documents/) |
+| Total commands registered | 13 across 2 plugins |
+| Documentation pages | 9 (README + 8 docs in documents/) |
 
 ---
 

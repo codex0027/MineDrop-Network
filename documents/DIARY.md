@@ -1,6 +1,6 @@
 # MineDrop Network — Development Diary
 
-> **Last Updated**: August 11, 2026 — all 7 MDN-Auth gaps fixed + production hardened  
+> **Last Updated**: August 11, 2026 — Password auth system + /auth clear + COMMANDS.md  
 > **Build Status**: ✅ All 4 plugins building + signature-verified — mdn-auth production-ready
 > **Branch**: `main` | **Commit**: `afda633` (gap fixes)
 
@@ -767,6 +767,9 @@ CircuitBreakerTest (mdn-core) — 7 tests:
 | 2026-08-06 | `2a4a469` | MDN-Auth plugin #4 — TOTP 2FA, alt detection, device fingerprinting, pre-auth lockdown |
 | 2026-08-06 | *(pending)* | Signature auto-gen finalizedBy link for both bridge + core, Velocity allowed-build-hashes support, server eviction fix |
 | 2026-08-11 | `afda633` | MDN-Auth gap fixes — all 7 gaps (A-1 to A-7) + rate limiting + username→UUID mapping + backup codes + scheduled cleanup |
+| 2026-08-11 | `bd27a16` | /auth clear <ip> command — wipes alt tracking + removes whitelist, returns UUID count |
+| 2026-08-11 | `a32ddaa` | **Password auth system** — Argon2id hashing, /register, /login, SessionManager, AUTH_UPDATE, /auth suspend/unsuspend, login timeout |
+| 2026-08-11 | *(current)* | COMMANDS.md created — 13 commands across 2 plugins with permissions, usage, and flow docs. All 5 docs updated for Phase 13+14. |
 
 ---
 

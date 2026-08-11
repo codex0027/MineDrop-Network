@@ -123,5 +123,7 @@ mdn-bridge/src/main/java/net/minedrop/bridge/velocity/BridgeVelocityPlugin.java 
 
 *Audit completed August 5, 2026. 30 files analyzed. 36 issues found + 4 build issues. 40 fixed.*  
 *MDN-Auth spec comparison: August 6, 2026. 7 gaps found (A-1 to A-7). All 7 ✅ FIXED — August 11, 2026.*
-*Bonus improvements: rate limiting (5 attempts/15min), username→UUID mapping, scheduled cleanup task.*  
-*Build: ✅ All 4 plugins compile — mdn-api, mdn-bridge, mdn-core, mdn-auth.*
+*Password auth system: August 11, 2026. 6 new features, 0 regressions.*  
+*Bonus improvements: rate limiting, username→UUID mapping, scheduled cleanup, login timeout.*  
+*Build: ✅ All 4 plugins compile — mdn-api, mdn-bridge, mdn-core, mdn-auth.*  
+*Commands: 13 across 2 plugins — documented in COMMANDS.md.*

@@ -1,6 +1,6 @@
 # MineDrop Network — Development Diary
 
-> **Last Updated**: August 11, 2026 — Password auth system + /auth clear + COMMANDS.md  
+> **Last Updated**: August 11, 2026 — Phase 5-7 complete: /password, encryption, recovery, audit  
 > **Build Status**: ✅ All 4 plugins building + signature-verified — mdn-auth production-ready
 > **Branch**: `main` | **Commit**: `afda633` (gap fixes)
 
@@ -769,7 +769,9 @@ CircuitBreakerTest (mdn-core) — 7 tests:
 | 2026-08-11 | `afda633` | MDN-Auth gap fixes — all 7 gaps (A-1 to A-7) + rate limiting + username→UUID mapping + backup codes + scheduled cleanup |
 | 2026-08-11 | `bd27a16` | /auth clear <ip> command — wipes alt tracking + removes whitelist, returns UUID count |
 | 2026-08-11 | `a32ddaa` | **Password auth system** — Argon2id hashing, /register, /login, SessionManager, AUTH_UPDATE, /auth suspend/unsuspend, login timeout |
-| 2026-08-11 | *(current)* | COMMANDS.md created — 13 commands across 2 plugins with permissions, usage, and flow docs. All 5 docs updated for Phase 13+14. |
+| 2026-08-11 | `082e48e` | COMMANDS.md created + all 5 docs updated for Phase 13-14 |
+| 2026-08-11 | `e84714c` | **Phase 5-7** — /password change|reset (4 methods), Paper AUTH_UPDATE subscriber (fail-closed), TOTP AES/GCM encryption, backup code SHA-256 hashing, /auth recovery, mdn_auth_audit table |
+| 2026-08-11 | `06ebc1f` | Docs: COMMANDS.md + STEPS.md updated for Phase 5-7 (17 commands total) |
 
 ---
 

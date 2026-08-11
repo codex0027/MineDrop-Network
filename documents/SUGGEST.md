@@ -2,7 +2,7 @@
 
 > **Purpose**: Every idea, suggestion, and enhancement — whether implemented, planned, or deferred — is cataloged here.  
 > **For**: Future planning, prioritizing work, and ensuring no good idea gets lost.  
-> **Last Updated**: August 11, 2026 — Password auth system implemented, COMMANDS.md created
+> **Last Updated**: August 11, 2026 — Phase 5-7 complete: all 6 remaining spec gaps implemented
 
 ---
 
@@ -196,4 +196,4 @@ Ideas considered but decided against (with reasons).
 
 ---
 
-*Last updated: August 11, 2026 — 61 suggestions cataloged (47 implemented, 0 planned, 12 future, 2 rejected)*
+*Last updated: August 11, 2026 — 67 suggestions cataloged (53 implemented, 0 planned, 12 future, 2 rejected)*

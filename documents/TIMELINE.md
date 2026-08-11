@@ -15,13 +15,13 @@ Foundation →  Startup Fix →  JSON+Config →  Handshake+Sig →  MDN-Auth #4
  (6.5 hours)   (2.5 hours)     (50 min)      (3 hours)        (2 hours)      (1.5 hours)
     ✅ Done       ✅ Done         ✅ Done        ✅ Done          ✅ Done         ✅ Done
 
-         [Phase 13]         [Phase 14]
-    Password Auth →  Commands+Docs
-      (3 hours)        (30 min)
-        ✅ Done          ✅ Done
+         [Phase 13]         [Phase 14]         [Phase 15]
+    Password Auth →  Commands+Docs →  Hardening+Recovery
+      (3 hours)        (30 min)         (2 hours)
+        ✅ Done          ✅ Done           ✅ Done
 
                                                                               ▼
-                                                                     [Phase 15] ───► [Phase 16]
+                                                                     [Phase 16] ───► [Phase 17]
                                                                       Planned         Dreams
 ```
 
@@ -374,7 +374,38 @@ Status: ✅ Documentation complete — 9 markdown files in documents/
 
 ---
 
-## 🔜 Upcoming — Phase 15 (Planned)
+### Phase 15 — Spec Phase 5-7: Password Hardening, Recovery, Audit
+**Duration**: ~2 hours  
+**Date**: August 11, 2026  
+**Commit**: `e84714c` (7 files, +558/-28)
+
+```
+All 6 remaining spec gaps implemented:
+  ✅ /password change|reset     (4 reset methods: totp/backup/recovery)
+  ✅ Paper AUTH_UPDATE          (PlayerMoveEvent blocker, fail-closed)
+  ✅ TOTP secret encryption     (AES/GCM, env var key, legacy fallback)
+  ✅ Backup code hash storage   (SHA-256, hash-compare on verify)
+  ✅ Admin recovery flow        (/auth recovery, 15-min token)
+  ✅ Audit logging              (mdn_auth_audit table, non-blocking)
+
+New file: PasswordCommand.java (230 lines)
+Modified: AuthManager (+95), TotpManager (+103), CorePaperPlugin (+55),
+          AuthVelocityPlugin (+30), AuthCommand (+49), DatabaseSchema (+24)
+
+Build fix:
+  ✅ MDNAPI NPE guarded        (Core loads after Auth on Velocity)
+
+Live verification on Velocity 4.1.0:
+  [mdn-auth] Commands: /register, /login, /password, /2fa, /auth
+  [mdn-auth] Password auth: enabled (Argon2id, min 12 chars)
+  [mdn-auth] MDN-Auth enabled.
+
+Status: ✅ All 157 spec points addressed, 17 commands live
+```
+
+---
+
+## 🔜 Upcoming — Phase 16 (Planned)
 
 **Target**: Next development session  
 **Focus**: MDN-Security plugin #5 — Anti-cheat & exploit prevention
@@ -390,7 +421,7 @@ Estimated effort: 2-3 hours
 
 ---
 
-## 📋 Phase 16 — Future (Medium Term)
+## 📋 Phase 17 — Future (Medium Term)
 
 **Focus**: Rate Limiting + Graceful Degradation + Monitoring
 
@@ -409,7 +440,7 @@ Estimated effort: 4-6 hours
 
 ---
 
-## 🌟 Phase 17 — Dreams (Long Term)
+## 🌟 Phase 18 — Dreams (Long Term)
 
 **Focus**: Scale + High Availability
 
@@ -430,7 +461,7 @@ Estimated effort: 8-12 hours (spread across weeks)
 
 | Metric | Count |
 |--------|-------|
-| Total commits | 17 |
+| Total commits | 18 |
 | Total files created | 94 |
 | Total source lines | ~5,700 |
 | Total test lines | ~400 |
@@ -443,6 +474,8 @@ Estimated effort: 8-12 hours (spread across weeks)
 | Spec comparison gaps | 0 (all 7 fixed) |
 | Total commands registered | 13 across 2 plugins |
 | Documentation pages | 9 (README + 8 docs in documents/) |
+| Total commands registered | 17 across 2 plugins |
+| Spec gaps remaining | 0 (all 7 original + 6 Phase 5-7 = 13 total fixed) |
 
 ---
 

@@ -2,6 +2,7 @@ package net.minedrop.core.paper;
 
 import net.minedrop.api.ApiVersion;
 import net.minedrop.api.MDNAPI;
+import net.minedrop.api.packet.AuthUpdatePacket;
 import net.minedrop.bridge.BridgeManager;
 import net.minedrop.bridge.paper.BridgePaperPlugin;
 import net.minedrop.core.cache.PlayerCache;
@@ -18,11 +19,15 @@ import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import org.bukkit.event.player.PlayerJoinEvent;
+import org.bukkit.event.player.PlayerMoveEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.jetbrains.annotations.NotNull;
 
 import java.time.Duration;
+import java.util.Set;
+import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.logging.Level;
 
 /**
@@ -50,6 +55,9 @@ public final class CorePaperPlugin extends JavaPlugin implements Listener {
     private DeadLetterQueue deadLetterQueue;
 
     private int heartbeatTaskId = -1;
+
+    /** Set of UUIDs that have been authenticated by Velocity/MDN-Auth. */
+    private final Set<UUID> authenticatedPlayers = ConcurrentHashMap.newKeySet();
 
     @Override
     public void onLoad() {
@@ -134,6 +142,23 @@ public final class CorePaperPlugin extends JavaPlugin implements Listener {
 
         // ── Step 11: Subscribe to Redis packet bus ──
         redisManager.subscribe("mdn_packet_bus", packetDispatcher::dispatch);
+
+        // ── Step 12: Subscribe to AUTH_UPDATE channel for auth enforcement ──
+        redisManager.subscribe("mdn_auth", msg -> {
+            try {
+                var packet = MDNAPI.getInstance().getObjectMapper()
+                        .readValue(msg, AuthUpdatePacket.class);
+                if (packet.isStatus()) {
+                    authenticatedPlayers.add(packet.getUuid());
+                    getLogger().info("Player authenticated (AUTH_UPDATE): " + packet.getUuid());
+                } else {
+                    authenticatedPlayers.remove(packet.getUuid());
+                    getLogger().info("Player deauthenticated (AUTH_UPDATE): " + packet.getUuid());
+                }
+            } catch (Exception e) {
+                getLogger().warning("Failed to parse AUTH_UPDATE: " + e.getMessage());
+            }
+        });
 
         getLogger().info("MDN-Core Paper enabled. All systems ready.");
         getLogger().info("  API: v" + ApiVersion.CURRENT
@@ -289,6 +314,36 @@ public final class CorePaperPlugin extends JavaPlugin implements Listener {
     public void onPlayerQuit(PlayerQuitEvent event) {
         Player player = event.getPlayer();
         playerCache.invalidate(player.getUniqueId());
+        authenticatedPlayers.remove(player.getUniqueId());
+    }
+
+    /**
+     * Enforces authentication before gameplay (spec §72-73 — "Paper must fail closed").
+     * Blocks movement for unauthenticated players.
+     */
+    @EventHandler
+    public void onPlayerMove(PlayerMoveEvent event) {
+        if (!event.hasChangedPosition()) return; // only block actual movement
+
+        Player player = event.getPlayer();
+        if (!isAuthenticated(player.getUniqueId())) {
+            event.setCancelled(true);
+            // Only send message once every ~5 seconds
+            if (System.currentTimeMillis() - lastAuthWarning.getOrDefault(
+                    player.getUniqueId(), 0L) > 5000) {
+                player.sendMessage("§c⚠ You are not authenticated! Please log in via the proxy.");
+                lastAuthWarning.put(player.getUniqueId(), System.currentTimeMillis());
+            }
+        }
+    }
+
+    private final java.util.Map<UUID, Long> lastAuthWarning = new ConcurrentHashMap<>();
+
+    /**
+     * Checks if a player is authenticated (spec §73 — fail closed: unknown = not authenticated).
+     */
+    public boolean isAuthenticated(UUID uuid) {
+        return authenticatedPlayers.contains(uuid);
     }
 
     // ── Commands ──

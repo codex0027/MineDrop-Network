@@ -3,6 +3,7 @@ package net.minedrop.auth;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.zaxxer.hikari.HikariDataSource;
+import net.minedrop.api.security.SecurityUtil;
 import net.minedrop.core.redis.RedisManager;
 import org.slf4j.Logger;
 
@@ -11,6 +12,7 @@ import javax.crypto.spec.SecretKeySpec;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.security.InvalidKeyException;
+import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
 import java.sql.Connection;
@@ -46,7 +48,8 @@ public final class TotpManager {
     private final RedisManager redisManager;
     private final ObjectMapper objectMapper;
     private final Logger logger;
-    private final HikariDataSource dataSource; // nullable — MySQL optional on Velocity
+    private final HikariDataSource dataSource;
+    private final String encryptionKey;
 
     public TotpManager(RedisManager redisManager, ObjectMapper objectMapper, Logger logger,
                        HikariDataSource dataSource) {
@@ -54,6 +57,9 @@ public final class TotpManager {
         this.objectMapper = objectMapper;
         this.logger = logger;
         this.dataSource = dataSource;
+        // Encryption key: env var → default. DO NOT use this default in production.
+        this.encryptionKey = System.getenv().getOrDefault("MDN_TOTP_ENCRYPTION_KEY",
+                "minedrop-dev-totp-key-2024-change-me");
     }
 
     // ── Secret generation ──
@@ -85,21 +91,29 @@ public final class TotpManager {
         record.ipLock = null;
         record.createdAt = Instant.now().getEpochSecond();
 
-        // ── MySQL persistence (A-1) ──
+        // ── Encrypt secret + hash backup codes for secure storage (§52, §20) ──
+        String encryptedSecret = encryptSecret(secret);
+        String hashedBackupCodes = hashBackupCodes(backupCodes);
+
+        // Store encrypted in MySQL + hashed in Redis for display purposes
+        record.secret = secret; // Redis keeps plaintext for 24h TTL cache
+        record.backupCodes = hashedBackupCodes; // Redis stores hashes too now
+
+        // ── MySQL persistence (A-1) with encryption ──
         if (dataSource != null && !dataSource.isClosed()) {
             try (Connection conn = dataSource.getConnection();
                  PreparedStatement ps = conn.prepareStatement(
                      "INSERT INTO mdn_auth_totp (uuid, totp_secret, backup_codes, ip_lock, created_at) " +
                      "VALUES (?, ?, ?, NULL, NOW()) ON DUPLICATE KEY UPDATE totp_secret=?, backup_codes=?")) {
                 ps.setString(1, playerUuid.toString());
-                ps.setString(2, secret);
-                ps.setString(3, record.backupCodes);
-                ps.setString(4, secret);
-                ps.setString(5, record.backupCodes);
+                ps.setString(2, encryptedSecret);
+                ps.setString(3, hashedBackupCodes);
+                ps.setString(4, encryptedSecret);
+                ps.setString(5, hashedBackupCodes);
                 ps.executeUpdate();
-                logger.debug("TOTP record persisted to MySQL for {}", playerUuid);
+                logger.debug("TOTP record persisted to MySQL for {} (secret encrypted, codes hashed)", playerUuid);
             } catch (SQLException e) {
-                logger.error("Failed to persist TOTP record to MySQL for {} — falling back to Redis-only", playerUuid, e);
+                logger.error("Failed to persist TOTP record to MySQL for {}", playerUuid, e);
             }
         }
 
@@ -216,7 +230,7 @@ public final class TotpManager {
                 try (ResultSet rs = ps.executeQuery()) {
                     if (rs.next()) {
                         TotpRecord record = new TotpRecord();
-                        record.secret = rs.getString("totp_secret");
+                        record.secret = decryptSecret(rs.getString("totp_secret"));
                         record.backupCodes = rs.getString("backup_codes");
                         record.ipLock = rs.getString("ip_lock");
                         record.createdAt = rs.getLong(4);
@@ -310,11 +324,8 @@ public final class TotpManager {
     // ── Backup code verification (A-5) ──
 
     /**
-     * Verifies a backup recovery code and removes it from the stored set.
-     *
-     * @param playerUuid the player's UUID
-     * @param code       the 8-digit backup code
-     * @return true if the code was valid and has been consumed
+     * Verifies a backup recovery code against stored hashes (spec §20).
+     * Backups are now SHA-256 hashed — we hash the input and compare.
      */
     public boolean verifyBackupCode(UUID playerUuid, String code) {
         TotpRecord record = getRecord(playerUuid);
@@ -322,19 +333,20 @@ public final class TotpManager {
             return false;
         }
 
-        Set<String> codes = new HashSet<>(Arrays.asList(record.backupCodes.split(",")));
-        if (!codes.contains(code)) {
+        String codeHash = sha256(code);
+        Set<String> hashes = new HashSet<>(Arrays.asList(record.backupCodes.split(",")));
+        if (!hashes.contains(codeHash)) {
             logger.debug("Invalid backup code attempt for {}", playerUuid);
             return false;
         }
 
-        // Remove the used code
-        codes.remove(code);
-        record.backupCodes = String.join(",", codes);
+        // Remove the used hash
+        hashes.remove(codeHash);
+        record.backupCodes = String.join(",", hashes);
 
         // Persist updated codes to both stores
         saveRecord(playerUuid, record);
-        logger.info("Backup code consumed for {} — {} codes remaining", playerUuid, codes.size());
+        logger.info("Backup code consumed for {} — {} codes remaining", playerUuid, hashes.size());
         return true;
     }
 
@@ -452,6 +464,57 @@ public final class TotpManager {
     /** Cleanup — Redis + MySQL pools managed externally. */
     public void shutdown() {
         // Resources managed by RedisManager and MDNAPI
+    }
+
+    // ── Encryption helpers (§52) ──
+
+    private String encryptSecret(String secret) {
+        try {
+            return SecurityUtil.encryptAes(secret, encryptionKey);
+        } catch (Exception e) {
+            logger.error("Failed to encrypt TOTP secret — storing in plaintext as fallback", e);
+            return "PLAINTEXT:" + secret; // Fallback marker so we know it's unencrypted
+        }
+    }
+
+    private String decryptSecret(String encrypted) {
+        if (encrypted == null) return null;
+        if (encrypted.startsWith("PLAINTEXT:")) {
+            return encrypted.substring(10); // Legacy unencrypted storage
+        }
+        try {
+            return SecurityUtil.decryptAes(encrypted, encryptionKey);
+        } catch (Exception e) {
+            logger.error("Failed to decrypt TOTP secret — wrong key or corrupt data", e);
+            return null;
+        }
+    }
+
+    // ── Backup code hashing (§20) ──
+
+    private String hashBackupCodes(String[] codes) {
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < codes.length; i++) {
+            if (i > 0) sb.append(',');
+            sb.append(sha256(codes[i]));
+        }
+        return sb.toString();
+    }
+
+    private static String sha256(String input) {
+        try {
+            MessageDigest md = MessageDigest.getInstance("SHA-256");
+            byte[] hash = md.digest(input.getBytes(StandardCharsets.UTF_8));
+            StringBuilder hex = new StringBuilder();
+            for (byte b : hash) {
+                String h = Integer.toHexString(0xff & b);
+                if (h.length() == 1) hex.append('0');
+                hex.append(h);
+            }
+            return hex.toString();
+        } catch (NoSuchAlgorithmException e) {
+            throw new RuntimeException("SHA-256 not available", e);
+        }
     }
 
     // ── IP Verify Result enum (A-2) ──

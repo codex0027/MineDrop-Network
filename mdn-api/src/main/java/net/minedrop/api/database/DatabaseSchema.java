@@ -28,6 +28,7 @@ public final class DatabaseSchema {
     public static final String TABLE_ACCOUNTS         = "mdn_accounts";
     public static final String TABLE_BACKUP_CODES     = "mdn_backup_codes";
     public static final String TABLE_PASSWORD_RESETS  = "mdn_password_resets";
+    public static final String TABLE_AUTH_AUDIT       = "mdn_auth_audit";
 
     // ── DDL Statements ──
 
@@ -209,6 +210,29 @@ public final class DatabaseSchema {
                     UNIQUE KEY uq_mdn_reset_token (token_hash),
                     INDEX idx_mdn_reset_account (account_id),
                     INDEX idx_mdn_reset_expiry (expires_at)
+                )
+                """,
+
+                // 12. Auth Audit Log (spec §80-81)
+                """
+                CREATE TABLE IF NOT EXISTS mdn_auth_audit (
+                    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+
+                    account_id BIGINT UNSIGNED NULL,
+                    uuid CHAR(36) NULL,
+
+                    event_type VARCHAR(64) NOT NULL,
+                    source_ip VARCHAR(64) NULL,
+                    metadata_json JSON NULL,
+
+                    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+                    PRIMARY KEY (id),
+
+                    INDEX idx_auth_audit_account (account_id),
+                    INDEX idx_auth_audit_uuid (uuid),
+                    INDEX idx_auth_audit_event (event_type),
+                    INDEX idx_auth_audit_created (created_at)
                 )
                 """
         );

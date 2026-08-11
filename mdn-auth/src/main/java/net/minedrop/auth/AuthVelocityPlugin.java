@@ -115,7 +115,16 @@ public final class AuthVelocityPlugin {
         initRedis();
 
         // ── Step 4: Initialize AuthManager with MySQL from MDN-Core ──
-        var ds = MDNAPI.getInstance() != null ? MDNAPI.getInstance().getDataSource() : null;
+        // MDNAPI may not be initialized yet (Core loads after Auth on Velocity).
+        // Fall back to Redis-only mode — MySQL is optional on Velocity.
+        com.zaxxer.hikari.HikariDataSource ds = null;
+        try {
+            if (MDNAPI.isInitialized()) {
+                ds = MDNAPI.getInstance().getDataSource();
+            }
+        } catch (Exception e) {
+            logger.info("MDNAPI not available — running in Redis-only mode");
+        }
         authManager = new AuthManager(redisManager, logger, ds);
         authManager.initialize();
 
@@ -518,8 +527,21 @@ public final class AuthVelocityPlugin {
                 )
         );
 
-        // /auth — Admin commands (unblock, clear, suspend, unsuspend)
-        // Pass player resolver for suspend/unsuspend username resolution
+        // /password — Change or reset password
+        cmd.register(
+                cmd.metaBuilder("password")
+                        .plugin(this)
+                        .build(),
+                authManager.createPasswordCommand(
+                        enforceIpLock,
+                        () -> {
+                            // On password change/reset, re-require authentication
+                            // (player is disconnected by session revocation)
+                        }
+                )
+        );
+
+        // /auth — Admin commands (unblock, clear, suspend, unsuspend, recovery)
         cmd.register(
                 cmd.metaBuilder("auth")
                         .plugin(this)
@@ -529,7 +551,7 @@ public final class AuthVelocityPlugin {
                 )
         );
 
-        logger.info("Commands: /register, /login, /2fa, /auth");
+        logger.info("Commands: /register, /login, /password, /2fa, /auth");
     }
 
     // ── Alt list cleanup (A-6) ──

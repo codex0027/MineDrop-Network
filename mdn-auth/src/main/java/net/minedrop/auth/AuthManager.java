@@ -3,14 +3,18 @@ package net.minedrop.auth;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.zaxxer.hikari.HikariDataSource;
+import net.minedrop.api.security.SecurityUtil;
 import net.minedrop.auth.command.AuthCommand;
 import net.minedrop.auth.command.LoginCommand;
+import net.minedrop.auth.command.PasswordCommand;
 import net.minedrop.auth.command.RegisterCommand;
 import net.minedrop.auth.command.TwoFactorCommand;
 import net.minedrop.bridge.BridgeManager;
 import net.minedrop.core.redis.RedisManager;
 import org.slf4j.Logger;
 
+import java.util.Base64;
+import java.security.SecureRandom;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
@@ -474,6 +478,21 @@ public final class AuthManager {
         String newHash = passwordHasher.hash(newPassword);
         if (newHash == null) return false;
 
+        return updatePasswordHash(playerUuid, newHash);
+    }
+
+    /**
+     * Hashes a password (exposed for PasswordCommand recovery flow).
+     */
+    public String hashPassword(char[] password) {
+        return passwordHasher.hash(password);
+    }
+
+    /**
+     * Updates the password hash in MySQL directly (recovery flow, no current password needed).
+     */
+    public boolean updatePasswordHash(UUID playerUuid, String newHash) {
+        if (dataSource == null || dataSource.isClosed()) return false;
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(
                  "UPDATE mdn_accounts SET password_hash = ?, password_changed_at = NOW(), password_version = password_version + 1 WHERE uuid = ?")) {
@@ -481,14 +500,81 @@ public final class AuthManager {
             ps.setString(2, playerUuid.toString());
             int rows = ps.executeUpdate();
             if (rows > 0) {
-                revokeAllSessions(playerUuid, "Password changed — all sessions revoked");
-                logger.info("Password changed for {}", playerUuid);
+                revokeAllSessions(playerUuid, "Password reset — all sessions revoked");
+                logger.info("Password reset (force) for {}", playerUuid);
                 return true;
             }
             return false;
         } catch (SQLException e) {
             logger.error("Failed to update password for {}", playerUuid, e);
             return false;
+        }
+    }
+
+    // ── Admin recovery (spec §56-57) ──
+
+    /**
+     * Generates a one-time recovery token for manual admin password reset.
+     * Token expires in 15 minutes. Returns the raw token (show to admin, never log).
+     */
+    public String generateRecoveryToken(UUID playerUuid, String adminName) {
+        SecureRandom rng = new SecureRandom();
+        byte[] bytes = new byte[16];
+        rng.nextBytes(bytes);
+        String rawToken = Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
+        String tokenHash = SecurityUtil.sha256Hex(rawToken);
+
+        // Store token hash in Redis with 15-min TTL
+        redisManager.setWithExpiry("mdn:auth:recovery:" + playerUuid, tokenHash, 900);
+
+        logger.info("Recovery token generated for {} by {} (expires in 15 min)", playerUuid, adminName);
+        return rawToken;
+    }
+
+    /**
+     * Validates a recovery token and resets the password.
+     */
+    public boolean validateRecoveryToken(UUID playerUuid, String rawToken, char[] newPassword) {
+        String storedHash = redisManager.get("mdn:auth:recovery:" + playerUuid);
+        if (storedHash == null) return false;
+
+        String inputHash = SecurityUtil.sha256Hex(rawToken);
+        if (!inputHash.equals(storedHash)) return false;
+
+        // Token is valid — delete it (one-time use)
+        redisManager.delete("mdn:auth:recovery:" + playerUuid);
+
+        // Reset password
+        String newHash = passwordHasher.hash(newPassword);
+        if (newHash == null) return false;
+
+        if (updatePasswordHash(playerUuid, newHash)) {
+            // Also clear TOTP (spec: recovery resets all factors)
+            totpManager.deleteSecret(playerUuid);
+            logger.info("Recovery completed for {} — password reset + TOTP cleared", playerUuid);
+            return true;
+        }
+        return false;
+    }
+
+    // ── Audit logging (spec §80-81) ──
+
+    /**
+     * Records an audit event in the mdn_auth_audit table.
+     * Never logs passwords, secrets, or tokens.
+     */
+    public void auditEvent(UUID playerUuid, String eventType, String sourceIp, String metadata) {
+        if (dataSource == null || dataSource.isClosed()) return;
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                 "INSERT INTO mdn_auth_audit (uuid, event_type, source_ip, metadata_json) VALUES (?, ?, ?, ?)")) {
+            ps.setString(1, playerUuid.toString());
+            ps.setString(2, eventType);
+            ps.setString(3, sourceIp);
+            ps.setString(4, metadata);
+            ps.executeUpdate();
+        } catch (SQLException e) {
+            logger.debug("Audit event failed (non-critical): {} for {}", eventType, playerUuid);
         }
     }
 
@@ -603,6 +689,11 @@ public final class AuthManager {
     public RegisterCommand createRegisterCommand(
             java.util.function.Consumer<com.velocitypowered.api.proxy.Player> onAuthenticated) {
         return new RegisterCommand(this, logger, onAuthenticated);
+    }
+
+    /** Creates the {@link PasswordCommand} for /password change|reset. */
+    public PasswordCommand createPasswordCommand(boolean enforceIpLock, Runnable onPasswordChanged) {
+        return new PasswordCommand(this, logger, enforceIpLock, onPasswordChanged);
     }
 
     /** Creates the {@link LoginCommand} with post-auth + post-password-verify + 2FA check callbacks. */

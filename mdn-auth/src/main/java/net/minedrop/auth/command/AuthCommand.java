@@ -3,12 +3,14 @@ package net.minedrop.auth.command;
 import com.velocitypowered.api.command.SimpleCommand;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
+import net.kyori.adventure.text.format.TextDecoration;
 import net.minedrop.auth.AuthManager;
 import org.slf4j.Logger;
 
 /**
  * Handles /auth admin commands:
- * /auth unblock <ip>, /auth clear <ip>, /auth suspend <player>, /auth unsuspend <player>
+ * /auth unblock <ip>, /auth clear <ip>, /auth suspend <player>,
+ * /auth unsuspend <player>, /auth recovery <player>
  */
 public final class AuthCommand implements SimpleCommand {
 
@@ -42,6 +44,9 @@ public final class AuthCommand implements SimpleCommand {
                     .append(Component.newline())
                     .append(Component.text("  /auth unsuspend <player>", NamedTextColor.GRAY))
                     .append(Component.text(" — Unsuspend an account", NamedTextColor.WHITE))
+                    .append(Component.newline())
+                    .append(Component.text("  /auth recovery <player>", NamedTextColor.GRAY))
+                    .append(Component.text(" — Generate recovery token", NamedTextColor.WHITE))
                     .build());
             return;
         }
@@ -53,8 +58,9 @@ public final class AuthCommand implements SimpleCommand {
             case "clear" -> handleClear(invocation, args);
             case "suspend" -> handleSuspend(invocation, args);
             case "unsuspend" -> handleUnsuspend(invocation, args);
+            case "recovery" -> handleRecovery(invocation, args);
             default -> invocation.source().sendMessage(Component.text(
-                    "Usage: /auth <unblock|clear|suspend|unsuspend>", NamedTextColor.RED));
+                    "Usage: /auth <unblock|clear|suspend|unsuspend|recovery>", NamedTextColor.RED));
         }
     }
 
@@ -151,6 +157,45 @@ public final class AuthCommand implements SimpleCommand {
         } else {
             invocation.source().sendMessage(Component.text("Failed to suspend account. Check database connectivity.", NamedTextColor.RED));
         }
+    }
+
+    private void handleRecovery(Invocation invocation, String[] args) {
+        if (args.length < 2) {
+            invocation.source().sendMessage(Component.text("Usage: /auth recovery <player>", NamedTextColor.RED));
+            return;
+        }
+
+        String targetName = args[1];
+        String executorName = invocation.source() instanceof com.velocitypowered.api.proxy.Player p
+                ? p.getUsername() : "console";
+
+        var targetUuid = authManager.resolveUsername(targetName, playerResolver);
+        if (targetUuid.isEmpty()) {
+            invocation.source().sendMessage(Component.text()
+                    .append(Component.text("✗ ", NamedTextColor.RED))
+                    .append(Component.text("Player '" + targetName + "' not found.", NamedTextColor.RED))
+                    .build());
+            return;
+        }
+
+        // Generate one-time recovery token (15-min TTL)
+        String token = authManager.generateRecoveryToken(targetUuid.get(), executorName);
+
+        invocation.source().sendMessage(Component.text()
+                .append(Component.text("✓ ", NamedTextColor.GREEN))
+                .append(Component.text("Recovery token for " + targetName + ":", NamedTextColor.GREEN))
+                .build());
+        invocation.source().sendMessage(Component.text()
+                .append(Component.text(token, NamedTextColor.GOLD, TextDecoration.BOLD))
+                .build());
+        invocation.source().sendMessage(Component.text()
+                .append(Component.text("This token expires in 15 minutes. Give it to the player securely.", NamedTextColor.GRAY))
+                .build());
+        invocation.source().sendMessage(Component.text()
+                .append(Component.text("Player should use: /password reset recovery <token> <new_password>", NamedTextColor.GRAY))
+                .build());
+
+        logger.info("Recovery token generated for {} by {}", targetName, executorName);
     }
 
     private void handleUnsuspend(Invocation invocation, String[] args) {

@@ -1,7 +1,7 @@
 # MineDrop Network — Development Timeline
 
 > **Purpose**: Visual roadmap of everything we've built, are building, and will build.  
-> **Last Updated**: August 11, 2026 — Password auth system + /auth clear + COMMANDS.md
+> **Last Updated**: August 11, 2026 — Lobby freeze system (AuthFreezeManager, AUTH_UPDATE on connect)
 
 ---
 
@@ -15,13 +15,13 @@ Foundation →  Startup Fix →  JSON+Config →  Handshake+Sig →  MDN-Auth #4
  (6.5 hours)   (2.5 hours)     (50 min)      (3 hours)        (2 hours)      (1.5 hours)
     ✅ Done       ✅ Done         ✅ Done        ✅ Done          ✅ Done         ✅ Done
 
-         [Phase 13]         [Phase 14]         [Phase 15]
-    Password Auth →  Commands+Docs →  Hardening+Recovery
-      (3 hours)        (30 min)         (2 hours)
-        ✅ Done          ✅ Done           ✅ Done
+         [Phase 13]         [Phase 14]         [Phase 15]        [Phase 16]
+    Password Auth →  Commands+Docs →  Hardening+Recovery →  Lobby Freeze
+      (3 hours)        (30 min)         (2 hours)          (1.5 hours)
+        ✅ Done          ✅ Done           ✅ Done             ✅ Done
 
                                                                               ▼
-                                                                     [Phase 16] ───► [Phase 17]
+                                                                     [Phase 17] ───► [Phase 18]
                                                                       Planned         Dreams
 ```
 
@@ -405,7 +405,50 @@ Status: ✅ All 157 spec points addressed, 17 commands live
 
 ---
 
-## 🔜 Upcoming — Phase 16 (Planned)
+### Phase 16 — Lobby Freeze System (Final Auth Architecture)
+**Duration**: ~1.5 hours  
+**Date**: August 11, 2026  
+**Commit**: `bad7dbb` (6 files, +710/-36)
+
+```
+Implements the final authentication architecture (spec §1-114):
+  ✅ AuthFreezeManager.java    (519 lines, 15 event handlers)
+  ✅ Movement freeze            (lock X/Y/Z, allow yaw/pitch — no teleport spam)
+  ✅ Damage protection          (EntityDamageEvent + by-entity)
+  ✅ Block protection           (Break + Place)
+  ✅ Interaction protection     (Interact + InteractEntity + InteractAtEntity)
+  ✅ Inventory protection       (Open + Click + Drag)
+  ✅ Item protection            (Drop + Pickup + Consume)
+  ✅ Command whitelist          (register, login, password, 2fa, help only)
+  ✅ Teleport protection        (only to auth spawn, lenient distance check)
+  ✅ BossBar UX                 (Yellow bar with instructions)
+  ✅ Title UX                   (join + unfreeze success messages)
+  ✅ Auth timeout               (configurable, default 120s, async checker)
+  ✅ Auto-freeze on join        (250ms delay for AUTH_UPDATE, fail-closed)
+
+Velocity-side:
+  ✅ AUTH_UPDATE(false) on LoginEvent    (lobby freezes player on connect)
+  ✅ AUTH_UPDATE(false) on DisconnectEvent (lobby cleans up)
+  ✅ Config: authentication.publish-on-connect: true
+
+Critical safety fix:
+  ✅ wasAlreadyAuth guard       (duplicate connection AUTH_UPDATE(false) does NOT
+                                freeze authenticated player — spec §52-53)
+
+Config:
+  ✅ Paper config.yml           authentication section (spawn, freeze, timeout,
+                                allowed-commands, messages, show-title)
+  ✅ Velocity config-velocity.yml authentication.publish-on-connect
+
+Code review: 5 issues found → all 5 fixed (1 critical, 2 medium, 2 low)
+
+Verified: Proxy starts with auth-publish=true, 5 commands loading
+Status: ✅ Code complete — requires MySQL for full lobby enable
+```
+
+---
+
+## 🔜 Upcoming — Phase 17 (Planned)
 
 **Target**: Next development session  
 **Focus**: MDN-Security plugin #5 — Anti-cheat & exploit prevention
@@ -421,7 +464,7 @@ Estimated effort: 2-3 hours
 
 ---
 
-## 📋 Phase 17 — Future (Medium Term)
+## 📋 Phase 18 — Future (Medium Term)
 
 **Focus**: Rate Limiting + Graceful Degradation + Monitoring
 
@@ -440,7 +483,7 @@ Estimated effort: 4-6 hours
 
 ---
 
-## 🌟 Phase 18 — Dreams (Long Term)
+## 🌟 Phase 19 — Dreams (Long Term)
 
 **Focus**: Scale + High Availability
 
@@ -461,21 +504,20 @@ Estimated effort: 8-12 hours (spread across weeks)
 
 | Metric | Count |
 |--------|-------|
-| Total commits | 18 |
-| Total files created | 94 |
-| Total source lines | ~5,700 |
+| Total commits | 20 |
+| Total files created | 95 |
+| Total source lines | ~6,200 |
 | Total test lines | ~400 |
-| Build errors encountered & fixed | 13 |
+| Build errors encountered & fixed | 14 |
 | Unit tests passing | 24/24 |
 | Plugins fully implemented | 4 (mdn-api, mdn-bridge, mdn-core, mdn-auth) |
 | Plugins as skeletons | 6 |
-| Issues fixed (all time) | 53 |
-| Suggestions cataloged | 59 |
-| Spec comparison gaps | 0 (all 7 fixed) |
-| Total commands registered | 13 across 2 plugins |
+| Issues fixed (all time) | 58 |
+| Suggestions cataloged | 67 |
 | Documentation pages | 9 (README + 8 docs in documents/) |
 | Total commands registered | 17 across 2 plugins |
-| Spec gaps remaining | 0 (all 7 original + 6 Phase 5-7 = 13 total fixed) |
+| Spec gaps remaining | 0 (all 13 fixed — 7 auth gaps + 6 hardening) |
+| Freeze event handlers | 15 (move, damage×2, block×2, interact×3, inventory×3, items×3, cmd, teleport) |
 
 ---
 

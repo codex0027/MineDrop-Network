@@ -1,6 +1,6 @@
-# MineDrop Network — Development Diary
-
-> **Last Updated**: August 11, 2026 — Phase 5-7 complete: /password, encryption, recovery, audit  
+# MineDrop Network — Development Diary> **Last Updated**: August 11, 2026 — Lobby freeze system (AuthFreezeManager)  
+> **Total Commands**: 17 across 2 plugins  
+> **Freeze Protections**: 15 event handlers: /password, encryption, recovery, audit  
 > **Build Status**: ✅ All 4 plugins building + signature-verified — mdn-auth production-ready
 > **Branch**: `main` | **Commit**: `afda633` (gap fixes)
 
@@ -772,6 +772,8 @@ CircuitBreakerTest (mdn-core) — 7 tests:
 | 2026-08-11 | `082e48e` | COMMANDS.md created + all 5 docs updated for Phase 13-14 |
 | 2026-08-11 | `e84714c` | **Phase 5-7** — /password change|reset (4 methods), Paper AUTH_UPDATE subscriber (fail-closed), TOTP AES/GCM encryption, backup code SHA-256 hashing, /auth recovery, mdn_auth_audit table |
 | 2026-08-11 | `06ebc1f` | Docs: COMMANDS.md + STEPS.md updated for Phase 5-7 (17 commands total) |
+| 2026-08-11 | `17ba300` | Docs: all 4 docs finalized — TIMELINE Phase 15, DIARY Round 11, SUGGEST + ISSUES counts |
+| 2026-08-11 | `bad7dbb` | **Lobby freeze system** — AuthFreezeManager (519 lines, 15 event handlers), Velocity AUTH_UPDATE(false) on connect, wasAlreadyAuth safety check, BossBar + title UX |
 
 ---
 

@@ -124,7 +124,8 @@ mdn-bridge/src/main/java/net/minedrop/bridge/velocity/BridgeVelocityPlugin.java 
 *Audit completed August 5, 2026. 30 files analyzed. 36 issues found + 4 build issues. 40 fixed.*  
 *MDN-Auth spec comparison: August 6, 2026. 7 gaps found (A-1 to A-7). All 7 ✅ FIXED — August 11, 2026.*
 *Spec Phase 5-7: August 11, 2026. 6 gaps addressed (password hardening, AUTH_UPDATE subscriber, TOTP encryption, backup hashing, admin recovery, audit logging). All 6 ✅ DONE.*  
-*157-point spec: 100% addressed — 13 gaps total, all fixed.*  
+*157-point spec: 100% addressed — 13 gaps total, all fixed. Final auth architecture (spec §1-114) implemented.*  
 *Build: ✅ All 4 plugins compile — mdn-api, mdn-bridge, mdn-core, mdn-auth.*  
 *Commands: 17 across 2 plugins — documented in COMMANDS.md.*  
-*Live verified: Velocity 4.1.0 — all commands loading, password auth enabled.*
+*Freeze: 15 event handlers — movement(allow look), damage×2, blocks×2, interact×3, inventory×3, items×3, commands, teleport.*  
+*Live verified: Velocity 4.1.0 — all commands loading, password auth enabled, auth-publish=true.*

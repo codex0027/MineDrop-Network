@@ -1,6 +1,6 @@
 # MineDrop Network — Command Reference
 
-> **Last Updated**: August 11, 2026 — Phase 5-7 complete  
+> **Last Updated**: August 11, 2026 — Lobby freeze system (AuthFreezeManager)
 > **Total Commands**: 17 across 2 plugins (mdn-core, mdn-auth)
 
 ---
@@ -341,3 +341,59 @@ Player must have logged in at least once (Redis username→UUID mapping required
 | `/auth suspend <player>` | `mdn.auth.admin` |
 | `/auth unsuspend <player>` | `mdn.auth.admin` |
 | `/auth recovery <player>` | `mdn.auth.admin` |
+| `/auth status <player>` | `mdn.auth.admin` |
+
+---
+
+## 🌐 Network Features (Non-Command)
+
+### Lobby Freeze System (Paper-side, MDN-Core)
+
+When a player joins the lobby before authenticating via Velocity/MDN-Auth:
+
+- **Spawn**: Teleported to configurable auth spawn location
+- **Movement**: X/Y/Z locked, yaw/pitch allowed (player can look around)
+- **Damage**: EntityDamageEvent + EntityDamageByEntityEvent blocked
+- **Blocks**: BlockBreakEvent, BlockPlaceEvent blocked
+- **Interaction**: PlayerInteractEvent, PlayerInteractEntityEvent, PlayerInteractAtEntityEvent blocked
+- **Inventory**: InventoryOpenEvent, InventoryClickEvent, InventoryDragEvent blocked
+- **Items**: PlayerDropItemEvent, EntityPickupItemEvent, PlayerItemConsumeEvent blocked
+- **Commands**: Only whitelisted auth commands allowed (register, login, password, 2fa, help)
+- **Teleport**: Only to auth spawn location
+- **BossBar**: Yellow bar with auth instructions
+- **Title**: Join + unfreeze success titles
+- **Timeout**: Configurable (default 120s), player kicked with message
+- **Fail-closed**: Unknown state = frozen, never assume authenticated
+
+**Config** (`plugins/mdn-core/config.yml`):
+```yaml
+authentication:
+  enabled: true
+  spawn:
+    world: "world"
+    x: 0.5
+    y: 100.0
+    z: 0.5
+    yaw: 180.0
+    pitch: 0.0
+  freeze:
+    allow-look: true
+  timeout-seconds: 120
+  allowed-commands:
+    - "register"
+    - "login"
+    - "password"
+    - "2fa"
+    - "help"
+  show-title: true
+```
+
+### AUTH_UPDATE Flow (Velocity → Paper)
+
+1. Player connects → Velocity publishes `AUTH_UPDATE(false)` to Redis `mdn_auth` channel
+2. Lobby receives → freezes player at auth spawn
+3. Player authenticates → MDN-Auth publishes `AUTH_UPDATE(true)`
+4. Lobby receives → unfreezes player, gameplay begins
+5. Player disconnects → Velocity publishes `AUTH_UPDATE(false)` → lobby cleans up
+
+**Duplicate connection protection**: A new connection for the same UUID does NOT freeze/kick the existing authenticated player.

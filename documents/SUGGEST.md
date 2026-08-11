@@ -196,4 +196,5 @@ Ideas considered but decided against (with reasons).
 
 ---
 
-*Last updated: August 11, 2026 — 67 suggestions cataloged (53 implemented, 0 planned, 12 future, 2 rejected)*
+*Last updated: August 11, 2026 — 72 suggestions cataloged (58 implemented, 0 planned, 12 future, 2 rejected)*  
+*Phase 16 (Lobby Freeze): 5 new suggestions (#68-#72) — lobby freeze system, wasAlreadyAuth guard, BossBar UX, auto-freeze, neutral auth message — all implemented.*

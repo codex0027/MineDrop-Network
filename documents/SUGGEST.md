@@ -2,7 +2,7 @@
 
 > **Purpose**: Every idea, suggestion, and enhancement — whether implemented, planned, or deferred — is cataloged here.  
 > **For**: Future planning, prioritizing work, and ensuring no good idea gets lost.  
-> **Last Updated**: August 6, 2026 — MDN-Auth spec comparison + new suggestions (#53-#59)
+> **Last Updated**: August 11, 2026 — all 7 MDN-Auth gap suggestions (#53-#59) now implemented
 
 ---
 
@@ -10,8 +10,8 @@
 
 | Status | Count |
 |--------|-------|
-| ✅ Implemented | 35 |
-| 🔜 Planned (Near Future) | 8 |
+| ✅ Implemented | 42 |
+| 🔜 Planned (Near Future) | 1 |
 | 📋 Future Consideration | 10 |
 | ❌ Rejected / Deferred | 2 |
 | **Total** | **59** |
@@ -122,16 +122,6 @@ These suggestions have been fully implemented and are in the codebase.
 
 These are targeted for the next development session.
 
-| # | Suggestion | Priority | Effort | Why It Matters |
-|---|-----------|----------|--------|---------------|
-| 53 | **Add MySQL `mdn_auth_totp` table** — spec mandates SQL; TOTP records currently Redis-only (data loss on flush) | 🟠 High | Medium | Data persistence per design spec |
-| 54 | **Enforce IP lock on 2FA** — `enforce-ip-lock: true` parsed but never checked on verify | 🟡 Medium | Low | Session security for staff |
-| 55 | **Full `/2fa reset` implementation** — stub, needs DB-backed username→UUID resolution | 🟡 Medium | Medium | Admin tool completeness |
-| 56 | **Implement SHADOW_BAN action** — enum exists, never used in code paths | 🟢 Low | Low | Silent flagging for suspicious accounts |
-| 57 | **Backup code verification** — no `/2fa verify-backup <code>` command | 🟡 Medium | Low | Player recovery when authenticator app lost |
-| 58 | **Alt list TTL cleanup** — IP/fingerprint Redis lists grow indefinitely | 🟡 Medium | Low | Prevent unbounded Redis memory growth |
-| 59 | **PreLoginEvent use real UUID** — currently uses UUID.randomUUID() placeholder | 🟢 Low | Low | Accuracy of early IP alt check |
-
 ### Other Planned
 
 | # | Suggestion | Priority | Effort | Why It Matters |
@@ -162,6 +152,18 @@ These are targeted for the next development session.
 |---|-----------|--------|---------------|
 | 48 | MDN-Auth plugin #4 — TOTP 2FA, alt detection, device fingerprinting, pre-auth lockdown | Design doc | 8 files in `mdn-auth/` (Phase 11, Steps 105-114) |
 | 49 | Velocity allowed-build-hashes support — BridgeVelocityPlugin reads hashes from config like Paper does | Self | `BridgeVelocityPlugin.java`, `config-velocity.yml` |
+
+### MDN-Auth Gap Fixes — All 7 Spec Comparison Gaps
+
+| # | Suggestion | Source | Implemented In |
+|---|-----------|--------|---------------|
+| 53 | **MySQL `mdn_auth_totp` table** — dual-write to MySQL + Redis cache with fallback | Spec vs impl audit | `TotpManager.java` (Phase 12, Step 121) |
+| 54 | **IP lock enforcement** — `verifyCodeWithIpLock()` + `IpVerifyResult` enum + rate limiting | Spec vs impl audit | `TotpManager.java`, `TwoFactorCommand.java` (Phase 12, Steps 123-124) |
+| 55 | **Full `/2fa reset`** — ProxyServer API + Redis username→UUID mapping | Spec vs impl audit | `AuthManager.java`, `TwoFactorCommand.java` (Phase 12, Steps 125-126) |
+| 56 | **SHADOW_BAN implementation** — KICK→SHADOW_BAN conversion + Redis set tracking | Spec vs impl audit | `AuthVelocityPlugin.java`, `AltDetector.java` (Phase 12, Steps 127-128) |
+| 57 | **Backup code verification** — `/2fa verify-backup <code>` + code consumption + rate limit sharing | Spec vs impl audit | `TotpManager.java`, `TwoFactorCommand.java` (Phase 12, Steps 129-130) |
+| 58 | **Alt list TTL cleanup** — 24h expire on IP+FP keys + scheduled cleanup task | Spec vs impl audit | `AltDetector.java`, `RedisManager.java`, `AuthVelocityPlugin.java` (Phase 12, Steps 131-133) |
+| 59 | **PreLoginEvent real UUID** — resolves from Redis username mapping instead of random | Spec vs impl audit | `AuthVelocityPlugin.java` (Phase 12, Step 134) |
 
 ---
 
@@ -194,4 +196,4 @@ Ideas considered but decided against (with reasons).
 
 ---
 
-*Last updated: August 6, 2026 — 59 suggestions cataloged (35 implemented, 8 planned, 10 future, 2 rejected)*
+*Last updated: August 11, 2026 — 59 suggestions cataloged (42 implemented, 1 planned, 10 future, 2 rejected)*

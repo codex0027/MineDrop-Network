@@ -1,8 +1,8 @@
 # MineDrop Network — Development Diary
 
-> **Last Updated**: August 6, 2026 — MDN-Auth plugin #4 implemented + spec comparison audit  
-> **Build Status**: ✅ All 4 plugins building — both signature-verified, handshake on attempt 1
-> **Branch**: `main` | **Commit**: `2a4a469` (MDN-Auth) + *(pending doc update)*
+> **Last Updated**: August 11, 2026 — all 7 MDN-Auth gaps fixed + production hardened  
+> **Build Status**: ✅ All 4 plugins building + signature-verified — mdn-auth production-ready
+> **Branch**: `main` | **Commit**: `afda633` (gap fixes)
 
 > **📚 Companion Docs**: [STEPS.md](STEPS.md) (step-by-step log) · [SUGGEST.md](SUGGEST.md) (suggestions catalog) · [TIMELINE.md](TIMELINE.md) (roadmap)
 
@@ -20,7 +20,8 @@
 8. [Round 5 — Velocity Config Bootstrap Fix](#round-5--velocity-config-bootstrap-fix)
 9. [Round 6 — Cross-Server Handshake & Signature Verification](#round-6--cross-server-handshake--signature-verification)
 10. [Round 7 — MDN-Auth Plugin #4 Implementation](#round-7--mdn-auth-plugin-4-implementation)
-11. [File Map — Every File Explained](#file-map--every-file-explained)
+11. [Round 8 — MDN-Auth Gap Fixes & Production Hardening](#round-8--mdn-auth-gap-fixes--production-hardening)
+12. [File Map — Every File Explained](#file-map--every-file-explained)
 9. [How to Build](#how-to-build)
 10. [How to Add a New Plugin](#how-to-add-a-new-plugin)
 11. [How to Add a New Feature](#how-to-add-a-new-feature)
@@ -318,6 +319,52 @@ Added `saveDefaultConfig()` methods to both Velocity plugins:
 
 ---
 
+## Round 8 — MDN-Auth Gap Fixes & Production Hardening
+
+**Commit**: `afda633`  
+**Date**: August 11, 2026  
+**What was fixed**: All 7 spec comparison gaps (A-1 through A-7) + production enhancements
+
+### Gap Fix Summary
+
+| Gap | Fix | Key Methods |
+|-----|-----|-------------|
+| A-1 MySQL persistence | Dual-write to `mdn_auth_totp` table + Redis cache | `generateSecret()`, `getRecord()`, `saveRecord()` |
+| A-2 IP lock enforcement | IP prefix comparison with rate limiting | `verifyCodeWithIpLock()`, `IpVerifyResult` enum |
+| A-3 Full /2fa reset | ProxyServer API + Redis username→UUID mapping | `resolveUsername()`, `recordUsernameMapping()` |
+| A-4 SHADOW_BAN | KICK→SHADOW_BAN conversion, Redis set tracking | `shadowBan()`, `isShadowBanned()` |
+| A-5 Backup codes | `/2fa verify-backup <code>` command | `verifyBackupCode()`, `handleVerifyBackup()` |
+| A-6 Alt list TTL | 24h expire on IP+FP keys, scheduled cleanup | `expire()`, `startCleanupTask()` |
+| A-7 PreLoginEvent | Real UUID via Redis username lookup | Uses `event.getUsername()` + `resolveUsername()` |
+
+### Production Enhancements (Beyond Spec)
+- **Rate limiting**: 5 failed 2FA attempts → 15-minute lockout per UUID
+- **Username→UUID mapping**: Redis `mdn:auth:username:<name>` with 30-day TTL
+- **4 new Redis operations**: `expire`, `sadd`, `sismember`, `scard` in RedisManager
+- **Scheduled cleanup**: Daemon thread every 6h, proper shutdown in onProxyShutdown
+- **Graceful degradation**: TotpManager works with or without MySQL (null-safe dataSource)
+
+### Live Verification (Velocity 4.1.0)
+```
+Plugin 'MDN-Auth' fully verified — signature valid, hash matches.
+MDN-Auth enabled.
+  Alt limits: 3 per IP, 2 per fingerprint (action: KICK)
+  Staff 2FA: enabled (2 permission groups, ip-lock: on)
+  Commands: /2fa (setup|verify|verify-backup|reset), /auth (unblock)
+  Alt list cleanup task scheduled (every 6h)
+```
+
+### Files Changed (7 files, +638/-94)
+- `TotpManager.java`: +256 lines (MySQL, IP lock, backup codes, rate limit)
+- `AltDetector.java`: +44 lines (SHADOW_BAN, TTL cleanup)
+- `AuthManager.java`: +108 lines (constructor, passthrough methods)
+- `AuthVelocityPlugin.java`: +101 lines (SHADOW_BAN, cleanup task, PreLogin)
+- `TwoFactorCommand.java`: +158 lines (reset, backup verify, IP lock UX)
+- `RedisManager.java`: +48 lines (expire, sadd, sismember, scard)
+- `ISSUES.md`: updated (A-1 to A-7 all fixed)
+
+---
+
 ## Round 7 — MDN-Auth Plugin #4 Implementation
 
 **Commit**: `2a4a469`  
@@ -393,7 +440,7 @@ Compared implementation against `plan/MineDrop/plugins/03_MDN_Auth.md`:
 
 ---
 
-## Round 8 — Signature Auto-Gen + Eviction Fix (August 6, 2026)
+## Round 9 — Signature Auto-Gen + Eviction Fix (August 6, 2026)
 
 **What was changed**:
 
@@ -717,8 +764,9 @@ CircuitBreakerTest (mdn-core) — 7 tests:
 | 2026-08-04 | `81da386` | Velocity config bootstrap — saveDefaultConfig() for both plugins, config-velocity.yml now copies to disk, routing.default-region path support |
 | 2026-08-05 | `ed69f5d` | Cross-server handshake via Redis Pub/Sub + build-time signature.json generation + ClassLoader conflict fix |
 | 2026-08-05 | `de86137` | Handshake race fix (2s delay → SUCCESS on attempt 1) + signature hash fix (sorted entries + Python injection) + MDN-Core self-registration |
-| 2026-08-06 | `2a4a469` | MDN-Auth plugin #4 — TOTP 2FA, alt detection, device fingerprinting, pre-auth lockdown, 2 commands, config matches spec |
-| 2026-08-06 | *(pending)* | Signature auto-gen finalizedBy link for both bridge + core, Velocity allowed-build-hashes support, server eviction fix (discoverServers no longer pre-registers), startup.sh rewrite, duplicate register removed |
+| 2026-08-06 | `2a4a469` | MDN-Auth plugin #4 — TOTP 2FA, alt detection, device fingerprinting, pre-auth lockdown |
+| 2026-08-06 | *(pending)* | Signature auto-gen finalizedBy link for both bridge + core, Velocity allowed-build-hashes support, server eviction fix |
+| 2026-08-11 | `afda633` | MDN-Auth gap fixes — all 7 gaps (A-1 to A-7) + rate limiting + username→UUID mapping + backup codes + scheduled cleanup |
 
 ---
 

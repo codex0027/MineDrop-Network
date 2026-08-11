@@ -2,7 +2,7 @@
 
 > **Purpose**: Every single change — no matter how small — is logged here chronologically.  
 > **For**: New developers onboarding, debugging "why was this done this way", and auditing changes.  
-> **Last Updated**: August 6, 2026 — MDN-Auth plugin #4 implemented + spec comparison audit
+> **Last Updated**: August 11, 2026 — all 7 MDN-Auth gaps fixed + production hardened
 
 ---
 
@@ -708,6 +708,111 @@ Compared implementation against `plan/MineDrop/plugins/03_MDN_Auth.md`:
 
 ---
 
+## Phase 12 — MDN-Auth Gap Fixes & Production Hardening (Commit: `afda633`)
+
+### Step 12.1 — A-1: MySQL Persistence for TOTP Records
+
+**Root cause**: TOTP records were Redis-only — data loss on Redis flush. Design spec mandates MySQL `mdn_auth_totp` table.
+
+**Fix**: Dual-write architecture — MySQL is source of truth, Redis is 24h cache.
+
+| # | Change | File | Details |
+|---|--------|------|---------|
+| 121 | MySQL persistence | `TotpManager.java` | Constructor now accepts optional `HikariDataSource`. `generateSecret()` writes to MySQL via `INSERT ... ON DUPLICATE KEY UPDATE`. `getRecord()` tries Redis first → MySQL fallback → repopulates Redis cache. `deleteSecret()` deletes from both stores. `saveRecord()` updates backup_codes + ip_lock in both. |
+| 122 | DB schema already exists | `DatabaseSchema.java` | `mdn_auth_totp` table DDL was already present (added in Phase 2). No schema changes needed. |
+
+### Step 12.2 — A-2: IP Lock Enforcement
+
+**Root cause**: `enforce-ip-lock: true` was parsed but never checked on 2FA verify.
+
+**Fix**: IP prefix comparison on every 2FA verify, plus rate limiting.
+
+| # | Change | File | Details |
+|---|--------|------|---------|
+| 123 | IP lock verification | `TotpManager.java` | New `verifyCodeWithIpLock()` method: checks rate limit (5 fails/15min), compares stored IP prefix vs current IP, verifies TOTP code with drift. Returns `IpVerifyResult` enum: SUCCESS/INVALID_CODE/IP_MISMATCH/RATE_LIMITED/NO_SECRET/ERROR. |
+| 124 | IP lock UX | `TwoFactorCommand.java` | `handleVerify()` now uses `verifyTotpWithIpLock()` with switch on result. IP_MISMATCH → "reconnect from original network". RATE_LIMITED → "wait 15 minutes". On first successful verify, IP lock is set via `updateTotpIpLock()`. |
+
+### Step 12.3 — A-3: Full /2fa Reset Implementation
+
+**Root cause**: Stub — couldn't resolve username to UUID.
+
+**Fix**: Dual-resolution strategy (online + offline).
+
+| # | Change | File | Details |
+|---|--------|------|---------|
+| 125 | Username→UUID resolution | `AuthManager.java` | `resolveUsername()` tries ProxyServer API for online players, falls back to Redis `mdn:auth:username:<name>` key (30-day TTL). `recordUsernameMapping()` called on every `onLogin()`. |
+| 126 | Full reset handler | `TwoFactorCommand.java` | `handleReset()` now uses `resolveUsername()` with `playerResolver` function. Clear success/failure messaging for both online and offline targets. |
+
+### Step 12.4 — A-4: SHADOW_BAN Implementation
+
+**Root cause**: Enum value existed but never used — dead code.
+
+**Fix**: KICK→SHADOW_BAN conversion based on config, Redis set tracking.
+
+| # | Change | File | Details |
+|---|--------|------|---------|
+| 127 | SHADOW_BAN logic | `AuthVelocityPlugin.java` | `onLogin()` now checks: if `action == KICK && altAction == "SHADOW_BAN"` → calls `authManager.shadowBan(uuid)` instead of disconnecting. Player is allowed but silently flagged. |
+| 128 | SHADOW_BAN tracking | `AltDetector.java` | `shadowBan()` adds to Redis set `mdn:auth:shadow_banned`. `isShadowBanned()`/`getShadowBanCount()` for staff querying. |
+
+### Step 12.5 — A-5: Backup Code Verification
+
+**Root cause**: 8 backup codes generated but no command to use them.
+
+**Fix**: `/2fa verify-backup <code>` subcommand.
+
+| # | Change | File | Details |
+|---|--------|------|---------|
+| 129 | Backup code verification | `TotpManager.java` | `verifyBackupCode()` parses comma-separated codes, checks membership via HashSet, removes used code, persists to MySQL+Redis via `saveRecord()`. |
+| 130 | Backup code command | `TwoFactorCommand.java` | New `handleVerifyBackup()` — verifies code, unlocks player, warns to set up new 2FA. Shares rate limiter with TOTP verification. Added to help text + hasPermission(). |
+
+### Step 12.6 — A-6: Alt List TTL Cleanup
+
+**Root cause**: `lpush` without TTL — IP/fingerprint lists grew indefinitely.
+
+**Fix**: 24h TTL on all tracking keys + scheduled cleanup.
+
+| # | Change | File | Details |
+|---|--------|------|---------|
+| 131 | TTL on tracking keys | `AltDetector.java` | `recordLogin()` now calls `expire()` on both IP and fingerprint keys (24h TTL). |
+| 132 | Redis set operations | `RedisManager.java` | Added `expire(key, seconds)`, `sadd(key, member)`, `sismember(key, member)`, `scard(key)` — all with try-with-resources + error handling. |
+| 133 | Scheduled cleanup | `AuthVelocityPlugin.java` | `startCleanupTask()` runs daemon thread every 6h — logs shadow-ban count. Properly shut down in `onProxyShutdown()`. |
+
+### Step 12.7 — A-7: PreLoginEvent UUID Fix
+
+**Root cause**: Used `UUID.randomUUID()` — meaningless for alt detection.
+
+**Fix**: Real UUID resolution via Redis username mapping.
+
+| # | Change | File | Details |
+|---|--------|------|---------|
+| 134 | PreLoginEvent fix | `AuthVelocityPlugin.java` | Now uses `event.getUsername()` + `authManager.resolveUsername()` to find real UUID from Redis. Falls back to `UUID.randomUUID()` for first-time users (acceptable for early-warning check). |
+
+### Step 12.8 — Code Review Fixes
+
+Issues caught by code-reviewer-deepseek:
+
+| # | Issue | Fix |
+|---|-------|-----|
+| CR-1 | SHADOW_BAN dead code — `check()` never returned SHADOW_BAN | Changed `onLogin()` to convert KICK→SHADOW_BAN based on config (not return value) |
+| CR-2 | Help text missing `verify-backup` | Added to `/2fa` default help output |
+| CR-3 | No rate limiting on backup codes | Shares TOTP rate limiter via `verifyTotpWithIpLock(uuid, 0, ...)` check before backup code verification |
+
+### Step 12.9 — Live Verification
+
+Tested on Velocity 4.1.0 + Paper 26.2 test servers:
+
+```
+[18:09:50] Plugin 'MDN-Auth' fully verified — signature valid, hash matches. ✅
+[18:09:50] Plugin 'MDN-Auth' passed signature verification. ✅
+[18:09:50] MDN-Auth enabled. ✅
+[18:09:50]   Alt limits: 3 per IP, 2 per fingerprint (action: KICK)
+[18:09:50]   Staff 2FA: enabled (2 permission groups, ip-lock: on)
+[18:09:50]   Commands: /2fa (setup|verify|verify-backup|reset), /auth (unblock)
+[18:09:50]   Alt list cleanup task scheduled (every 6h)
+```
+
+---
+
 ## Summary Statistics
 
 ### By Phase
@@ -725,7 +830,8 @@ Compared implementation against `plan/MineDrop/plugins/03_MDN_Auth.md`:
 | Phase 9 (Handshake + Signature) | 1 | 0 | 8 | 0 |
 | Phase 10 (Race + Hash Fixes) | 1 | 0 | 5 | 0 |
 | Phase 11 (MDN-Auth Plugin #4) | 1 | 8 | 8 | 0 |
-| **Total** | **12** | **102** | **60** | **12** |
+| Phase 12 (MDN-Auth Gap Fixes) | 1 | 0 | 7 | 0 |
+| **Total** | **14** | **102** | **67** | **12** |
 
 *Phase 2 was bundled with Phase 1 commit
 
@@ -736,9 +842,10 @@ Compared implementation against `plan/MineDrop/plugins/03_MDN_Auth.md`:
 | mdn-bridge | 5 | 0 | 2 | 7 |
 | mdn-core | 15 | 1 | 2 | 18 |
 | mdn-auth | 7 | 0 | 1 | 8 |
+| mdn-core (RedisManager) | 1 | 0 | 0 | 1 |
 | 7 skeletons | 14 | 0 | 0 | 14 |
 | Root docs | DIARY, STEPS, SUGGEST, TIMELINE, README, DEPLOY, FIX-GUIDE, ISSUES | — | — | 8 |
-| **Total** | **56** | **3** | **4** | **71** |
+| **Total** | **57** | **3** | **4** | **72** |
 
 *Note: Two config files (velocity-plugin.json) were removed in Phase 7 — Velocity metadata is now 100% annotation-driven. Phase 8 connected the existing Velocity config files to the startup bootstrap — plugins now create data dirs and copy defaults on first run.*
 

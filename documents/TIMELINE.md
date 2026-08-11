@@ -1,7 +1,7 @@
 # MineDrop Network — Development Timeline
 
 > **Purpose**: Visual roadmap of everything we've built, are building, and will build.  
-> **Last Updated**: August 6, 2026 — MDN-Auth plugin #4 implemented + spec comparison audit
+> **Last Updated**: August 11, 2026 — all 7 MDN-Auth gaps fixed + production hardened
 
 ---
 
@@ -11,12 +11,12 @@
 2026-08-04 ───────────────────────────────────────────────────────► 2026-08-05 ──► Future
 
 [Phase 0-4]   [Phase 5-6]    [Phase 7-8]        [Phase 9-10]    [Phase 11]
-Foundation →  Startup Fix →  JSON+Config →  Handshake+Sig →  MDN-Auth #4
- (6.5 hours)   (2.5 hours)     (50 min)      (3 hours)        (2 hours)
-    ✅ Done       ✅ Done         ✅ Done        ✅ Done          ✅ Done
+Foundation →  Startup Fix →  JSON+Config →  Handshake+Sig →  MDN-Auth #4 →  Gap Fixes
+ (6.5 hours)   (2.5 hours)     (50 min)      (3 hours)        (2 hours)      (1.5 hours)
+    ✅ Done       ✅ Done         ✅ Done        ✅ Done          ✅ Done         ✅ Done
 
                                                                               ▼
-                                                                     [Phase 12] ───► [Phase 13]
+                                                                     [Phase 13] ───► [Phase 14]
                                                                       Planned         Dreams
 ```
 
@@ -283,26 +283,61 @@ Status: ✅ Config now works on Velocity exactly like Paper
 
 ---
 
-## 🔜 Upcoming — Phase 12 (Planned)
+### Phase 12 — MDN-Auth Gap Fixes & Production Hardening
+**Duration**: ~1.5 hours  
+**Date**: August 11, 2026  
+**Commit**: `afda633` (7 files, +638/-94)
+
+```
+All 7 spec comparison gaps fixed:
+  ✅ A-1 MySQL persistence      (dual-write: MySQL source of truth, Redis cache)
+  ✅ A-2 IP lock enforcement     (verifyCodeWithIpLock, rate limit 5/15min)
+  ✅ A-3 Full /2fa reset         (ProxyServer + Redis username→UUID resolution)
+  ✅ A-4 SHADOW_BAN              (KICK→SHADOW_BAN conversion, Redis set tracking)
+  ✅ A-5 Backup code verify      (/2fa verify-backup, consumes code, shares rate limit)
+  ✅ A-6 Alt list TTL            (24h expire on IP+FP keys, scheduled cleanup)
+  ✅ A-7 PreLoginEvent UUID      (resolves real UUID from Redis username mapping)
+
+Production enhancements beyond spec:
+  ✅ Rate limiting               5 failed 2FA attempts → 15-min lockout
+  ✅ Username→UUID mapping       Redis key with 30-day TTL for offline ops
+  ✅ Scheduled cleanup           Daemon thread every 6h, proper shutdown
+  ✅ Redis set operations        expire/sadd/sismember/scard with error handling
+
+Code review fixes:
+  ✅ SHADOW_BAN dead code       Fixed: onLogin() now converts KICK→SHADOW_BAN
+  ✅ Help text                   Added /2fa verify-backup to command list
+  ✅ Backup rate limiting        Shares TOTP rate limiter
+
+Verified on live servers:
+  [MDN-Auth] fully verified — signature valid, hash matches.
+  [MDN-Auth] passed signature verification.
+  [MDN-Auth] MDN-Auth enabled.
+  [MDN-Auth] Alt limits: 3/2, Staff 2FA: enabled (2 groups, ip-lock: on)
+  [MDN-Auth] Commands: /2fa (setup|verify|verify-backup|reset), /auth (unblock)
+
+Status: ✅ All 7 gaps fixed, mdn-auth production-ready
+```
+
+---
+
+## 🔜 Upcoming — Phase 13 (Planned)
 
 **Target**: Next development session  
-**Focus**: MDN-Auth gap fixes + Database schema completion
+**Focus**: MDN-Security plugin #5 — Anti-cheat & exploit prevention
 
 ```
 Planned work:
-  🔜 MDN-Auth SQL schema       Add mdn_auth_totp table to DatabaseSchema
-  🔜 IP lock enforcement       Check IP on 2FA verify, re-auth on IP change
-  🔜 /2fa reset full impl      Database-backed username→UUID resolution
-  🔜 Backup code verification  /2fa verify-backup <code> command
-  🔜 Alt list TTL cleanup      24h expiry on IP/fingerprint Redis lists
-  🔜 SHADOW_BAN implementation Silent flagging + staff alerts
+  🔜 MDN-Security plugin #5   Anti-cheat, anti-bot, anti-VPN, exploit prevention
+  🔜 Packet validation         Rate limiting, suspicious pattern detection
+  🔜 Machine fingerprinting    Advanced hardware ID (move from basic auth fingerprint)
 
 Estimated effort: 2-3 hours
 ```
 
 ---
 
-## 📋 Phase 13 — Future (Medium Term)
+## 📋 Phase 14 — Future (Medium Term)
 
 **Focus**: Rate Limiting + Graceful Degradation + Monitoring
 
@@ -321,7 +356,7 @@ Estimated effort: 4-6 hours
 
 ---
 
-## 🌟 Phase 14 — Dreams (Long Term)
+## 🌟 Phase 15 — Dreams (Long Term)
 
 **Focus**: Scale + High Availability
 
@@ -342,17 +377,17 @@ Estimated effort: 8-12 hours (spread across weeks)
 
 | Metric | Count |
 |--------|-------|
-| Total commits | 12 |
+| Total commits | 14 |
 | Total files created | 94 |
 | Total source lines | ~5,700 |
 | Total test lines | ~400 |
 | Build errors encountered & fixed | 13 |
 | Unit tests passing | 24/24 |
 | Plugins fully implemented | 4 (mdn-api, mdn-bridge, mdn-core, mdn-auth) |
-| Plugins as skeletons | 6 |
-| Suggestions cataloged | 53 |
+| Issues fixed (all time) | 53 |
+| Suggestions cataloged | 59 |
+| Spec comparison gaps | 0 (all 7 fixed) |
 | Documentation pages | 8 (README + 7 docs in documents/) |
-| Spec comparison gaps found | 7 (MDN-Auth — A-1 to A-7) |
 
 ---
 

@@ -104,6 +104,28 @@ public final class AltDetector {
     }
 
     /**
+     * Clears all alt tracking data for an IP address.
+     * Deletes both the alt account list AND the whitelist entry for this IP.
+     * This is more aggressive than unblock — it wipes the slate clean.
+     *
+     * @param ipAddress the IP to clear
+     * @return the number of UUIDs that were cleared from the alt list
+     */
+    public long clearIp(String ipAddress) {
+        String ipKey = KEY_IP_PREFIX + ipAddress;
+        long count = redisManager.llen(ipKey);
+
+        // Delete alt tracking data
+        redisManager.delete(ipKey);
+
+        // Also remove from whitelist (so it can be re-tracked)
+        redisManager.delete(KEY_UNBLOCKED_PREFIX + ipAddress);
+
+        logger.info("IP alt tracking cleared for {} — {} UUIDs removed", ipAddress, count);
+        return count;
+    }
+
+    /**
      * Checks whether an IP is on the permanent whitelist.
      */
     private boolean isIpUnblocked(String ipAddress) {

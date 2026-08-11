@@ -7,7 +7,7 @@ import net.minedrop.auth.AuthManager;
 import org.slf4j.Logger;
 
 /**
- * Handles /auth commands: /auth unblock <ip>
+ * Handles /auth commands: /auth unblock <ip>, /auth clear <ip>
  */
 public final class AuthCommand implements SimpleCommand {
 
@@ -29,6 +29,9 @@ public final class AuthCommand implements SimpleCommand {
                     .append(Component.newline())
                     .append(Component.text("  /auth unblock <ip>", NamedTextColor.GRAY))
                     .append(Component.text(" — Whitelist an IP from alt restrictions", NamedTextColor.WHITE))
+                    .append(Component.newline())
+                    .append(Component.text("  /auth clear <ip>", NamedTextColor.GRAY))
+                    .append(Component.text(" — Clear alt tracking data for an IP", NamedTextColor.WHITE))
                     .build());
             return;
         }
@@ -37,9 +40,11 @@ public final class AuthCommand implements SimpleCommand {
 
         if ("unblock".equals(subCommand)) {
             handleUnblock(invocation, args);
+        } else if ("clear".equals(subCommand)) {
+            handleClear(invocation, args);
         } else {
             invocation.source().sendMessage(Component.text(
-                    "Usage: /auth <unblock>", NamedTextColor.RED));
+                    "Usage: /auth <unblock|clear>", NamedTextColor.RED));
         }
     }
 
@@ -71,6 +76,36 @@ public final class AuthCommand implements SimpleCommand {
 
         logger.info("IP {} unblocked by {}",
                 ip, invocation.source() instanceof com.velocitypowered.api.proxy.Player p
+                        ? p.getUsername() : "console");
+    }
+
+    private void handleClear(Invocation invocation, String[] args) {
+        if (args.length < 2) {
+            invocation.source().sendMessage(Component.text("Usage: /auth clear <ip>", NamedTextColor.RED));
+            return;
+        }
+
+        String ip = args[1];
+
+        // Basic IPv4 validation
+        if (!ip.matches("\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}")) {
+            invocation.source().sendMessage(Component.text("Invalid IP address format.", NamedTextColor.RED));
+            return;
+        }
+
+        long cleared = authManager.clearIp(ip);
+
+        invocation.source().sendMessage(Component.text()
+                .append(Component.text("✓ ", NamedTextColor.GREEN))
+                .append(Component.text("Cleared " + cleared + " UUID(s) from alt tracking for IP " + ip + ".", NamedTextColor.GREEN))
+                .build());
+        invocation.source().sendMessage(Component.text()
+                .append(Component.text("The IP whitelist entry was also removed — it can now be re-tracked.", NamedTextColor.GRAY))
+                .build());
+
+        logger.info("IP {} alt data cleared ({} UUIDs) by {}",
+                ip, cleared,
+                invocation.source() instanceof com.velocitypowered.api.proxy.Player p
                         ? p.getUsername() : "console");
     }
 }

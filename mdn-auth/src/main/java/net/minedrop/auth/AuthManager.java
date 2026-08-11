@@ -268,6 +268,16 @@ public final class AuthManager {
         altDetector.unblockIp(ipAddress);
     }
 
+    /**
+     * Clears all alt tracking data for an IP address.
+     * Deletes the alt list AND removes the whitelist entry.
+     *
+     * @return the number of UUIDs that were cleared
+     */
+    public long clearIp(String ipAddress) {
+        return altDetector.clearIp(ipAddress);
+    }
+
     // ── Service secrets (private lobbies) ──
 
     /**

@@ -1,7 +1,7 @@
 # MineDrop Network — Command Reference
 
-> **Last Updated**: August 11, 2026 — Password auth system + `/auth clear|suspend|unsuspend`  
-> **Total Commands**: 13 across 2 plugins (mdn-core, mdn-auth)
+> **Last Updated**: August 11, 2026 — Phase 5-7 complete  
+> **Total Commands**: 17 across 2 plugins (mdn-core, mdn-auth)
 
 ---
 
@@ -243,6 +243,47 @@ Player must have logged in at least once (Redis username→UUID mapping required
 
 ---
 
+### `/password change <current> <new>`
+**Permission**: None (must be authenticated)  
+**Platform**: Velocity only  
+
+**Usage**:
+```
+/password change MyOldPass MyNewPass123
+```
+**Flow**: Verifies current password → hashes new password with Argon2id → updates MySQL → revokes all other sessions.
+
+---
+
+### `/password reset <totp|backup|recovery> <code> <new>`
+**Permission**: None (proof-based)  
+**Platform**: Velocity only  
+
+**Usage**:
+```
+/password reset totp 123456 MyNewPass123
+/password reset backup 12345678 MyNewPass123
+/password reset recovery abc123def456 MyNewPass123
+```
+**Flow**:
+- `totp` — verifies 6-digit TOTP code → resets password → revokes all sessions
+- `backup` — verifies backup code (consumed) → resets password → revokes all sessions → prompts new 2FA
+- `recovery` — validates admin-generated token → resets password → clears TOTP → revokes all sessions
+
+---
+
+### `/auth recovery <player>`
+**Permission**: `mdn.auth.admin`  
+**Platform**: Velocity only  
+
+**Usage**:
+```
+/auth recovery Steve
+```
+**Effect**: Generates one-time recovery token (15-min TTL, SHA-256 hashed in Redis). Admin gives token to player securely. Player uses `/password reset recovery <token> <new_password>`. Clears TOTP + backup codes on successful recovery.
+
+---
+
 ### `/auth unsuspend <player>`
 **Permission**: `mdn.auth.admin`  
 **Platform**: Velocity only  
@@ -259,11 +300,11 @@ Player must have logged in at least once (Redis username→UUID mapping required
 
 | Permission | Commands |
 |-----------|----------|
-| *(none)* | `/hub`, `/lobby`, `/spawn`, `/website`, `/store`, `/vote`, `/discord`, `/help`, `/rules`, `/register`, `/login`, `/2fa verify`, `/2fa verify-backup` |
+| *(none)* | `/hub`, `/lobby`, `/spawn`, `/website`, `/store`, `/vote`, `/discord`, `/help`, `/rules`, `/register`, `/login`, `/password change`, `/password reset`, `/2fa verify`, `/2fa verify-backup` |
 | `mdn.auth.2fa.setup` | `/2fa setup` |
 | `mdn.auth.2fa.admin.reset` | `/2fa reset` |
 | `mdn.auth.admin.unblock` | `/auth unblock`, `/auth clear` |
-| `mdn.auth.admin` | `/auth suspend`, `/auth unsuspend`, `/auth unblock`, `/auth clear` |
+| `mdn.auth.admin` | `/auth suspend`, `/auth unsuspend`, `/auth unblock`, `/auth clear`, `/auth recovery` |
 | `mdn.admin.core` | `/mdn servers`, `/mdn health`, `/mdn reload` |
 
 ---
@@ -289,6 +330,8 @@ Player must have logged in at least once (Redis username→UUID mapping required
 |---------|------------|
 | `/register <password>` | None |
 | `/login <password>` | None |
+| `/password change <current> <new>` | None |
+| `/password reset <method> <code> <new>` | None |
 | `/2fa setup` | `mdn.auth.2fa.setup` |
 | `/2fa verify <code>` | None |
 | `/2fa verify-backup <code>` | None |
@@ -297,3 +340,4 @@ Player must have logged in at least once (Redis username→UUID mapping required
 | `/auth clear <ip>` | `mdn.auth.admin.unblock` |
 | `/auth suspend <player>` | `mdn.auth.admin` |
 | `/auth unsuspend <player>` | `mdn.auth.admin` |
+| `/auth recovery <player>` | `mdn.auth.admin` |

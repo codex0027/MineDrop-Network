@@ -19,7 +19,6 @@ import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import org.bukkit.event.player.PlayerJoinEvent;
-import org.bukkit.event.player.PlayerMoveEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.jetbrains.annotations.NotNull;
@@ -58,6 +57,9 @@ public final class CorePaperPlugin extends JavaPlugin implements Listener {
 
     /** Set of UUIDs that have been authenticated by Velocity/MDN-Auth. */
     private final Set<UUID> authenticatedPlayers = ConcurrentHashMap.newKeySet();
+
+    /** Lobby freeze system — blocks unauthenticated players (spec §11-24). */
+    private AuthFreezeManager authFreezeManager;
 
     @Override
     public void onLoad() {
@@ -143,17 +145,41 @@ public final class CorePaperPlugin extends JavaPlugin implements Listener {
         // ── Step 11: Subscribe to Redis packet bus ──
         redisManager.subscribe("mdn_packet_bus", packetDispatcher::dispatch);
 
-        // ── Step 12: Subscribe to AUTH_UPDATE channel for auth enforcement ──
+        // ── Step 12: Initialize auth freeze manager ──
+        authFreezeManager = new AuthFreezeManager(this, getLogger());
+        authFreezeManager.loadConfig(getConfig().getConfigurationSection("authentication"));
+        getServer().getPluginManager().registerEvents(authFreezeManager, this);
+        getLogger().info("Auth freeze manager loaded — frozen: " + authFreezeManager.getFrozenCount());
+
+        // ── Step 13: Subscribe to AUTH_UPDATE channel for auth enforcement ──
         redisManager.subscribe("mdn_auth", msg -> {
             try {
                 var packet = MDNAPI.getInstance().getObjectMapper()
                         .readValue(msg, AuthUpdatePacket.class);
+                UUID uuid = packet.getUuid();
                 if (packet.isStatus()) {
-                    authenticatedPlayers.add(packet.getUuid());
-                    getLogger().info("Player authenticated (AUTH_UPDATE): " + packet.getUuid());
+                    authenticatedPlayers.add(uuid);
+                    getLogger().info("Player authenticated (AUTH_UPDATE): " + uuid);
+                    // ── Unfreeze the player if they're online ──
+                    Player player = getServer().getPlayer(uuid);
+                    if (player != null && player.isOnline()) {
+                        authFreezeManager.unfreeze(player);
+                    }
                 } else {
-                    authenticatedPlayers.remove(packet.getUuid());
-                    getLogger().info("Player deauthenticated (AUTH_UPDATE): " + packet.getUuid());
+                    // Don't freeze if player was already authenticated —
+                    // this AUTH_UPDATE(false) is from a new duplicate connection,
+                    // not a deauth event (spec §52-53, §104).
+                    boolean wasAlreadyAuth = authenticatedPlayers.contains(uuid);
+                    authenticatedPlayers.remove(uuid);
+
+                    Player player = getServer().getPlayer(uuid);
+                    if (player != null && player.isOnline() && !wasAlreadyAuth) {
+                        authFreezeManager.freeze(player);
+                    }
+                    // Cleanup if player is not online or was disconnected
+                    if (player == null || !player.isOnline()) {
+                        authFreezeManager.onDisconnect(uuid);
+                    }
                 }
             } catch (Exception e) {
                 getLogger().warning("Failed to parse AUTH_UPDATE: " + e.getMessage());
@@ -165,7 +191,8 @@ public final class CorePaperPlugin extends JavaPlugin implements Listener {
                 + " | DB: " + (databaseManager.isConnected() ? "✓" : "✗")
                 + " | Redis: " + (redisManager.isConnected() ? "✓" : "✗")
                 + " | CB-DB: " + dbCircuitBreaker.getState()
-                + " | CB-Redis: " + redisCircuitBreaker.getState());
+                + " | CB-Redis: " + redisCircuitBreaker.getState()
+                + " | Freeze: " + (authFreezeManager != null && authFreezeManager.isEnabled() ? "active" : "DISABLED"));
     }
 
     @Override
@@ -179,6 +206,9 @@ public final class CorePaperPlugin extends JavaPlugin implements Listener {
         if (deadLetterQueue != null) deadLetterQueue.shutdown();
         if (dataSyncEngine != null) dataSyncEngine.shutdown();
         if (playerCache != null) playerCache.shutdown();
+        if (authFreezeManager != null) {
+            getLogger().info("Auth freeze manager shutdown — was tracking " + authFreezeManager.getFrozenCount() + " frozen players");
+        }
         // Shut down Redis BEFORE MDNAPI — RedisManager owns the subscriber threads
         // and must clean them up before the pool is closed by MDNAPI
         if (redisManager != null) redisManager.shutdown();
@@ -312,39 +342,21 @@ public final class CorePaperPlugin extends JavaPlugin implements Listener {
 
     @EventHandler
     public void onPlayerQuit(PlayerQuitEvent event) {
-        Player player = event.getPlayer();
-        playerCache.invalidate(player.getUniqueId());
-        authenticatedPlayers.remove(player.getUniqueId());
+        UUID uuid = event.getPlayer().getUniqueId();
+        playerCache.invalidate(uuid);
+        authenticatedPlayers.remove(uuid);
+        authFreezeManager.onDisconnect(uuid);
     }
 
     /**
-     * Enforces authentication before gameplay (spec §72-73 — "Paper must fail closed").
-     * Blocks movement for unauthenticated players.
-     */
-    @EventHandler
-    public void onPlayerMove(PlayerMoveEvent event) {
-        if (!event.hasChangedPosition()) return; // only block actual movement
-
-        Player player = event.getPlayer();
-        if (!isAuthenticated(player.getUniqueId())) {
-            event.setCancelled(true);
-            // Only send message once every ~5 seconds
-            if (System.currentTimeMillis() - lastAuthWarning.getOrDefault(
-                    player.getUniqueId(), 0L) > 5000) {
-                player.sendMessage("§c⚠ You are not authenticated! Please log in via the proxy.");
-                lastAuthWarning.put(player.getUniqueId(), System.currentTimeMillis());
-            }
-        }
-    }
-
-    private final java.util.Map<UUID, Long> lastAuthWarning = new ConcurrentHashMap<>();
-
-    /**
-     * Checks if a player is authenticated (spec §73 — fail closed: unknown = not authenticated).
+     * Checks if a player is authenticated (spec §63 — fail closed: unknown = not authenticated).
      */
     public boolean isAuthenticated(UUID uuid) {
         return authenticatedPlayers.contains(uuid);
     }
+
+    /** @return the auth freeze manager for external access. */
+    public AuthFreezeManager getAuthFreezeManager() { return authFreezeManager; }
 
     // ── Commands ──
 

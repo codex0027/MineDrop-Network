@@ -945,4 +945,61 @@ All 4 plugins build + signature verified ✅
 | Phase 13 (Password Auth System) | 1 | 4 | 7 | 1 |
 | Phase 14 (Commands + Docs) | 2 | 1 | 8 | 0 |
 | Phase 15 (Phase 5-7 Hardening) | 1 | 1 | 6 | 1 |
-| **Total** | **18** | **108** | **88** | **14** |
+| Phase 16 (Lobby Freeze System) | 1 | 1 | 2 | 0 |
+| **Total** | **19** | **109** | **90** | **14** |
+
+---
+
+## Phase 16 — Lobby Freeze System (spec §1-114 full architecture)
+
+### The Big Feature: No auth-limbo server needed
+
+Per the final auth architecture spec, players physically exist in the Lobby while
+authenticating. They see the normal lobby spawn, are frozen, and use `/login` or
+`/register` via chat. Velocity/MDN-Auth remains the authentication authority.
+
+### Step 154 — AuthFreezeManager.java (~450 lines)
+
+**New class** — complete lobby freeze system:
+- Configurable auth spawn (world, x, y, z, yaw, pitch)
+- Movement: lock X/Y/Z, allow yaw/pitch (look around) — no constant teleport spam
+- Damage: EntityDamageEvent + EntityDamageByEntityEvent blocked
+- Blocks: BlockBreakEvent, BlockPlaceEvent blocked
+- Interaction: PlayerInteractEvent, PlayerInteractEntityEvent, PlayerInteractAtEntityEvent blocked
+- Inventory: InventoryOpenEvent, InventoryClickEvent, InventoryDragEvent blocked
+- Items: PlayerDropItemEvent, EntityPickupItemEvent, PlayerItemConsumeEvent blocked
+- Commands: whitelist (register, login, 2fa, password, help) — all else blocked
+- Teleport: only auth spawn allowed (lenient distance check)
+- BossBar: Yellow with auth instructions (cleaned on unfreeze/disconnect)
+- Title: join + unfreeze success titles
+- Timeout: configurable (default 120s), async checker, kick with message
+- Auto-freeze: 250ms delay after join to allow AUTH_UPDATE(true) to arrive
+- Double-freeze guard
+- Anti-spam: warnings throttled to 5s
+
+### Step 155 — CorePaperPlugin changes
+
+- AuthFreezeManager integration in AUTH_UPDATE subscriber
+- **Critical fix**: `wasAlreadyAuth` check — duplicate connection AUTH_UPDATE(false)
+  does NOT freeze an already-authenticated player (spec §52-53)
+- `freeze()` on AUTH_UPDATE(false), `unfreeze()` on AUTH_UPDATE(true)
+- Cleanup on PlayerQuitEvent
+
+### Step 156 — Velocity AUTH_UPDATE(false) on connect
+
+- CoreVelocityPlugin publishes AUTH_UPDATE(false) on LoginEvent
+- Publishes AUTH_UPDATE(false) on DisconnectEvent for cleanup
+- New config: `authentication.publish-on-connect: true`
+
+### Step 157 — Config updates
+
+- Paper config.yml: `authentication` section (spawn, freeze, timeout, allowed-commands, messages)
+- Velocity config-velocity.yml: `authentication.publish-on-connect: true`
+
+### Step 158 — Code review fixes (5 resolved)
+
+1. CRITICAL: Duplicate connection no longer freezes auth'd player
+2. MEDIUM: BossBar double-freeze guard
+3. MEDIUM: Neutral auth message (server doesn't know registration state)
+4. LOW: Added PlayerInteractAtEntityEvent handler
+5. LOW: Teleport check uses lenient distance calculation

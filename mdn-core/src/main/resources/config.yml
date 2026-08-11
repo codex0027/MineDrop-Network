@@ -45,3 +45,44 @@ commands:
 routing:
   region-enabled: false
   default-region: "EU"
+
+# ── Lobby Authentication Freeze (spec §84, §11-24) ──
+# Freezes players who haven't authenticated via Velocity/MDN-Auth.
+# They spawn at the auth location, can look around, but cannot move,
+# interact, take damage, use inventory, or execute non-auth commands.
+authentication:
+  enabled: true
+
+  # ── Where unauthenticated players spawn ──
+  spawn:
+    world: "world"
+    x: 0.5
+    y: 100.0
+    z: 0.5
+    yaw: 180.0
+    pitch: 0.0
+
+  # ── Freeze behavior ──
+  freeze:
+    # Allow the player to look around (yaw/pitch) while frozen?
+    allow-look: true
+
+  # ── Seconds before an unauthenticated player is kicked ──
+  timeout-seconds: 120
+
+  # ── Commands allowed while unauthenticated ──
+  allowed-commands:
+    - "register"
+    - "login"
+    - "password"
+    - "2fa"
+    - "help"
+
+  # ── Show a title on join ──
+  show-title: true
+
+  # ── Chat messages shown to unauthenticated players ──
+  messages:
+    registered: "§eThis account is registered.\n§fPlease authenticate using: §a/login <password>"
+    new-player: "§eThis Minecraft account is not registered.\n§fRegister using: §a/register <password>"
+    totp-required: "§ePassword accepted. Two-factor authentication is required:\n§a/2fa verify <code>"

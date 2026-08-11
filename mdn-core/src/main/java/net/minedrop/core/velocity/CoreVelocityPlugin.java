@@ -17,6 +17,7 @@ import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
 import net.kyori.adventure.text.format.TextDecoration;
 import net.minedrop.api.MDNAPI;
+import net.minedrop.api.packet.AuthUpdatePacket;
 import net.minedrop.api.packet.MDNPacket;
 import net.minedrop.api.packet.ServerHeartbeatPacket;
 import net.minedrop.bridge.BridgeManager;
@@ -35,6 +36,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Map;
 import java.util.Optional;
+import java.util.UUID;
 
 /**
  * Velocity-side entry point for MDN-Core.
@@ -65,6 +67,7 @@ public final class CoreVelocityPlugin {
     private int redisPort = 6379;
     private String redisPassword = "";
     private String defaultRegion = "EU";
+    private boolean publishAuthOnConnect = true;
 
     @Inject
     public CoreVelocityPlugin(ProxyServer proxy, Logger logger) {
@@ -163,11 +166,20 @@ public final class CoreVelocityPlugin {
                 .map(s -> s.getServerInfo().getName())
                 .orElse(null);
         sessionManager.createSession(player.getUniqueId(), player.getUsername(), currentServer);
+
+        // ── Publish AUTH_UPDATE(false) on connect so lobby freezes the player (spec §6, §59, §62) ──
+        // This tells the Paper lobby: "Player is connected but NOT authenticated yet."
+        // The lobby's AuthFreezeManager will freeze them until MDN-Auth sends AUTH_UPDATE(true).
+        publishAuthUpdate(player.getUniqueId(), false);
     }
 
     @Subscribe
     public void onPlayerDisconnect(DisconnectEvent event) {
-        sessionManager.removeSession(event.getPlayer().getUniqueId());
+        var uuid = event.getPlayer().getUniqueId();
+        sessionManager.removeSession(uuid);
+
+        // ── Publish AUTH_UPDATE(false) on disconnect so lobby cleans up (spec §61) ──
+        publishAuthUpdate(uuid, false);
     }
 
     @Subscribe
@@ -251,7 +263,14 @@ public final class CoreVelocityPlugin {
                 defaultRegion = String.valueOf(routing.get("default-region"));
             }
 
-            logger.info("Config loaded: redis={}:{}, region={}", redisHost, redisPort, defaultRegion);
+            // Parse authentication config
+            Map<String, Object> auth = (Map<String, Object>) root.get("authentication");
+            if (auth != null && auth.containsKey("publish-on-connect")) {
+                publishAuthOnConnect = Boolean.parseBoolean(String.valueOf(auth.get("publish-on-connect")));
+            }
+
+            logger.info("Config loaded: redis={}:{}, region={}, auth-publish={}",
+                    redisHost, redisPort, defaultRegion, publishAuthOnConnect);
         } catch (IOException e) {
             logger.error("Failed to read config", e);
         } catch (ClassCastException e) {
@@ -323,6 +342,25 @@ public final class CoreVelocityPlugin {
                     lobby -> player.createConnectionRequest(lobby).fireAndForget(),
                     () -> player.sendMessage(Component.text("No lobby available!", NamedTextColor.RED))
             );
+        }
+    }
+
+    // ── AUTH_UPDATE helpers ──
+
+    /**
+     * Publishes an AuthUpdatePacket to the mdn_auth Redis channel.
+     * This is the authoritative signal for lobby freeze/unfreeze (spec §58-62).
+     */
+    private void publishAuthUpdate(UUID uuid, boolean authenticated) {
+        if (!publishAuthOnConnect || redisManager == null || !redisManager.isConnected()) {
+            return;
+        }
+        try {
+            AuthUpdatePacket packet = new AuthUpdatePacket(uuid, authenticated, uuid);
+            String json = MDNAPI.getInstance().getObjectMapper().writeValueAsString(packet);
+            redisManager.publish("mdn_auth", json);
+        } catch (Exception e) {
+            logger.error("Failed to publish AUTH_UPDATE for {}: {}", uuid, e.getMessage());
         }
     }
 

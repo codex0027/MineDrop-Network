@@ -36,3 +36,10 @@ routing:
       - "lobby-na-01"
     ASIA:
       - "lobby-asia-01"
+
+# ── Authentication (AUTH_UPDATE publishing on connect) ──
+# When enabled, MDN-Core publishes AUTH_UPDATE(false) on every player login
+# so the lobby can freeze the player until MDN-Auth confirms authentication.
+authentication:
+  # Publish AUTH_UPDATE(false) to Redis when a player connects?
+  publish-on-connect: true

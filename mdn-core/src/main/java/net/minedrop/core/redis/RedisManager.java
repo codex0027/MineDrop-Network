@@ -194,6 +194,54 @@ public final class RedisManager {
     }
 
     /**
+     * Sets a TTL (time-to-live) in seconds on an existing key.
+     * Returns false if the key doesn't exist or Redis is unavailable.
+     */
+    public boolean expire(String key, int seconds) {
+        try (Jedis jedis = jedisPool.getResource()) {
+            return jedis.expire(key, seconds) == 1;
+        } catch (Exception e) {
+            log.warn("Redis expire failed for key '{}': {}", key, e.getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * Adds a member to a Redis set.
+     */
+    public void sadd(String key, String member) {
+        try (Jedis jedis = jedisPool.getResource()) {
+            jedis.sadd(key, member);
+        } catch (Exception e) {
+            log.warn("Redis sadd failed for key '{}': {}", key, e.getMessage());
+        }
+    }
+
+    /**
+     * Checks if a member exists in a Redis set.
+     */
+    public boolean sismember(String key, String member) {
+        try (Jedis jedis = jedisPool.getResource()) {
+            return jedis.sismember(key, member);
+        } catch (Exception e) {
+            log.warn("Redis sismember failed for key '{}': {}", key, e.getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * Returns the cardinality (count) of a Redis set. Returns 0 on error.
+     */
+    public long scard(String key) {
+        try (Jedis jedis = jedisPool.getResource()) {
+            return jedis.scard(key);
+        } catch (Exception e) {
+            log.warn("Redis scard failed for key '{}': {}", key, e.getMessage());
+            return 0;
+        }
+    }
+
+    /**
      * Checks connection health with a hard timeout.
      * Uses a dedicated executor to avoid ForkJoinPool.commonPool() starvation
      * which could produce false-negative health check results.

@@ -7,9 +7,13 @@ import net.kyori.adventure.text.event.ClickEvent;
 import net.kyori.adventure.text.format.NamedTextColor;
 import net.kyori.adventure.text.format.TextDecoration;
 import net.minedrop.auth.AuthManager;
+import net.minedrop.auth.TotpManager;
 import org.slf4j.Logger;
 
+import java.util.Optional;
 import java.util.UUID;
+import java.util.function.Consumer;
+import java.util.function.Function;
 
 /**
  * Handles 2FA commands: /2fa setup, /2fa verify, /2fa reset.
@@ -18,13 +22,19 @@ public final class TwoFactorCommand implements SimpleCommand {
 
     private final AuthManager authManager;
     private final Logger logger;
-    private final java.util.function.Consumer<com.velocitypowered.api.proxy.Player> onVerified;
+    private final Consumer<Player> onVerified;
+    private final Function<String, Optional<Player>> playerResolver;
+    private final boolean enforceIpLock;
 
     public TwoFactorCommand(AuthManager authManager, Logger logger,
-                            java.util.function.Consumer<com.velocitypowered.api.proxy.Player> onVerified) {
+                            Consumer<Player> onVerified,
+                            Function<String, Optional<Player>> playerResolver,
+                            boolean enforceIpLock) {
         this.authManager = authManager;
         this.logger = logger;
         this.onVerified = onVerified;
+        this.playerResolver = playerResolver;
+        this.enforceIpLock = enforceIpLock;
     }
 
     @Override
@@ -40,6 +50,9 @@ public final class TwoFactorCommand implements SimpleCommand {
                     .append(Component.newline())
                     .append(Component.text("  /2fa verify <code>", NamedTextColor.GRAY))
                     .append(Component.text(" — Verify your 2FA code", NamedTextColor.WHITE))
+                    .append(Component.newline())
+                    .append(Component.text("  /2fa verify-backup <code>", NamedTextColor.GRAY))
+                    .append(Component.text(" — Use a backup recovery code", NamedTextColor.WHITE))
                     .build());
             return;
         }
@@ -49,18 +62,22 @@ public final class TwoFactorCommand implements SimpleCommand {
         switch (subCommand) {
             case "setup" -> handleSetup(invocation);
             case "verify" -> handleVerify(invocation, args);
+            case "verify-backup" -> handleVerifyBackup(invocation, args);
             case "reset" -> handleReset(invocation, args);
             default -> invocation.source().sendMessage(Component.text(
-                    "Usage: /2fa <setup|verify|reset>", NamedTextColor.RED));
+                    "Usage: /2fa <setup|verify|verify-backup|reset>", NamedTextColor.RED));
         }
     }
 
     @Override
     public boolean hasPermission(Invocation invocation) {
-        // /2fa verify is allowed even while locked (no permission required)
+        // /2fa verify and verify-backup are allowed even while locked (no permission required)
         String[] args = invocation.arguments();
-        if (args.length > 0 && "verify".equalsIgnoreCase(args[0])) {
-            return true;
+        if (args.length > 0) {
+            String sub = args[0].toLowerCase();
+            if ("verify".equals(sub) || "verify-backup".equals(sub)) {
+                return true;
+            }
         }
         // setup and reset need permissions
         return invocation.source().hasPermission("mdn.auth.2fa.setup")
@@ -150,6 +167,7 @@ public final class TwoFactorCommand implements SimpleCommand {
         }
 
         UUID uuid = player.getUniqueId();
+        String currentIp = player.getRemoteAddress().getAddress().getHostAddress();
 
         // Check if player is actually locked
         if (!authManager.isPlayerLocked(uuid)) {
@@ -157,22 +175,96 @@ public final class TwoFactorCommand implements SimpleCommand {
             return;
         }
 
-        // Verify
-        if (authManager.verifyTotp(uuid, code)) {
+        // ── Verify with IP lock (A-2) ──
+        TotpManager.IpVerifyResult result = authManager.verifyTotpWithIpLock(uuid, code, currentIp, enforceIpLock);
+
+        switch (result) {
+            case SUCCESS -> {
+                // Set IP lock on first successful verify (A-2)
+                if (enforceIpLock) {
+                    authManager.updateTotpIpLock(uuid, currentIp);
+                }
+                authManager.unlockPlayer(uuid);
+                onVerified.accept(player);
+                player.sendMessage(Component.text()
+                        .append(Component.text("✓ ", NamedTextColor.GREEN))
+                        .append(Component.text("2FA verified! You are now authenticated.", NamedTextColor.GREEN))
+                        .build());
+                logger.info("2FA verification succeeded for {} ({})", player.getUsername(), uuid);
+            }
+            case IP_MISMATCH -> {
+                player.sendMessage(Component.text()
+                        .append(Component.text("✗ ", NamedTextColor.RED))
+                        .append(Component.text("IP address changed! Please reconnect from your original network and try again.", NamedTextColor.RED))
+                        .build());
+                logger.warn("2FA IP lock mismatch for {} ({})", player.getUsername(), uuid);
+            }
+            case RATE_LIMITED -> {
+                player.sendMessage(Component.text()
+                        .append(Component.text("⏳ ", NamedTextColor.YELLOW))
+                        .append(Component.text("Too many failed attempts. Please wait 15 minutes and try again.", NamedTextColor.YELLOW))
+                        .build());
+                logger.warn("2FA rate-limited for {} ({})", player.getUsername(), uuid);
+            }
+            default -> {
+                player.sendMessage(Component.text()
+                        .append(Component.text("✗ ", NamedTextColor.RED))
+                        .append(Component.text("Invalid 2FA code. Please try again.", NamedTextColor.RED))
+                        .build());
+                logger.warn("2FA verification failed for {} ({})", player.getUsername(), uuid);
+            }
+        }
+    }
+
+    // ── Backup code verification (A-5) ──
+
+    private void handleVerifyBackup(Invocation invocation, String[] args) {
+        if (!(invocation.source() instanceof Player player)) {
+            invocation.source().sendMessage(Component.text("Only players can verify backup codes.", NamedTextColor.RED));
+            return;
+        }
+
+        if (args.length < 2) {
+            player.sendMessage(Component.text("Usage: /2fa verify-backup <code>", NamedTextColor.RED));
+            return;
+        }
+
+        String backupCode = args[1];
+        UUID uuid = player.getUniqueId();
+
+        // Share rate limiter with TOTP verification (A-5 security)
+        TotpManager.IpVerifyResult rateCheck = authManager.verifyTotpWithIpLock(uuid, 0,
+                player.getRemoteAddress().getAddress().getHostAddress(), false);
+        if (rateCheck == TotpManager.IpVerifyResult.RATE_LIMITED) {
+            player.sendMessage(Component.text()
+                    .append(Component.text("⏳ ", NamedTextColor.YELLOW))
+                    .append(Component.text("Too many failed attempts. Please wait 15 minutes and try again.", NamedTextColor.YELLOW))
+                    .build());
+            return;
+        }
+
+        if (!authManager.isPlayerLocked(uuid)) {
+            player.sendMessage(Component.text("You are not in a 2FA-locked state.", NamedTextColor.YELLOW));
+            return;
+        }
+
+        if (authManager.verifyBackupCode(uuid, backupCode)) {
             authManager.unlockPlayer(uuid);
-            // Route player to lobby + clear title overlay
             onVerified.accept(player);
             player.sendMessage(Component.text()
                     .append(Component.text("✓ ", NamedTextColor.GREEN))
-                    .append(Component.text("2FA verified! You are now authenticated.", NamedTextColor.GREEN))
+                    .append(Component.text("Backup code accepted! This code has been consumed.", NamedTextColor.GREEN))
                     .build());
-            logger.info("2FA verification succeeded for {} ({})", player.getUsername(), uuid);
+            player.sendMessage(Component.text()
+                    .append(Component.text("⚠ ", NamedTextColor.YELLOW))
+                    .append(Component.text("Set up a new 2FA with /2fa setup to get fresh backup codes.", NamedTextColor.YELLOW))
+                    .build());
+            logger.info("Backup code used for 2FA by {} ({})", player.getUsername(), uuid);
         } else {
             player.sendMessage(Component.text()
                     .append(Component.text("✗ ", NamedTextColor.RED))
-                    .append(Component.text("Invalid 2FA code. Please try again.", NamedTextColor.RED))
+                    .append(Component.text("Invalid backup code.", NamedTextColor.RED))
                     .build());
-            logger.warn("2FA verification failed for {} ({})", player.getUsername(), uuid);
         }
     }
 
@@ -188,25 +280,29 @@ public final class TwoFactorCommand implements SimpleCommand {
         }
 
         String targetName = args[1];
+        String executorName = invocation.source() instanceof Player p ? p.getUsername() : "console";
 
-        // Try to find the player from current online players
-        // UUID lookup for offline players requires a database (future update)
+        // ── Full UUID resolution (A-3) ──
+        Optional<UUID> targetUuid = authManager.resolveUsername(targetName, playerResolver);
 
-        invocation.source().sendMessage(Component.text()
-                .append(Component.text("⚠ ", NamedTextColor.YELLOW))
-                .append(Component.text("2FA reset for " + targetName + " requested.", NamedTextColor.WHITE))
-                .build());
-        // Reset the target's TOTP secret if we can find their UUID
-        var targetPlayer = java.util.Optional.<com.velocitypowered.api.proxy.Player>empty();
-        // Note: proxy.getPlayer() returns Optional<Player> — we can't access proxy from here.
-        // The reset requires the AuthVelocityPlugin to resolve the name to UUID.
-        // For now, this is a stub — full implementation needs database-backed UUID lookup.
-        invocation.source().sendMessage(Component.text()
-                .append(Component.text("⚠ ", NamedTextColor.YELLOW))
-                .append(Component.text("2FA reset requested. Full implementation requires database-backed UUID lookup.", NamedTextColor.GRAY))
-                .build());
-
-        logger.info("2FA reset requested for {} by {}", targetName,
-                invocation.source() instanceof Player p ? p.getUsername() : "console");
+        if (targetUuid.isPresent()) {
+            UUID uuid = targetUuid.get();
+            authManager.resetTotp(uuid);
+            authManager.unlockPlayer(uuid); // also unlock if they were stuck
+            invocation.source().sendMessage(Component.text()
+                    .append(Component.text("✓ ", NamedTextColor.GREEN))
+                    .append(Component.text("2FA has been reset for " + targetName + ".", NamedTextColor.GREEN))
+                    .build());
+            invocation.source().sendMessage(Component.text()
+                    .append(Component.text("They will need to run /2fa setup on their next login.", NamedTextColor.GRAY))
+                    .build());
+            logger.info("2FA reset for {} ({}) by {}", targetName, uuid, executorName);
+        } else {
+            invocation.source().sendMessage(Component.text()
+                    .append(Component.text("✗ ", NamedTextColor.RED))
+                    .append(Component.text("Player '" + targetName + "' not found. They must have logged in at least once.", NamedTextColor.RED))
+                    .build());
+            logger.warn("2FA reset failed for {} — UUID not resolvable (by {})", targetName, executorName);
+        }
     }
 }

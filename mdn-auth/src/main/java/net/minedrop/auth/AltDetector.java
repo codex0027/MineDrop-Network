@@ -22,6 +22,7 @@ public final class AltDetector {
     private static final String KEY_IP_PREFIX = "mdn:auth:alt:ip:";
     private static final String KEY_FP_PREFIX = "mdn:auth:alt:fp:";
     private static final String KEY_UNBLOCKED_PREFIX = "mdn:auth:unblocked:";
+    private static final String KEY_SHADOW_BANNED = "mdn:auth:shadow_banned";
     private static final int TTL_SECONDS = 86400; // 24 hours
 
     private final RedisManager redisManager;
@@ -74,22 +75,24 @@ public final class AltDetector {
 
     /**
      * Records a successful login, associating the UUID with the IP and fingerprint.
+     * Sets 24-hour TTL on all tracking keys (A-6 fix).
      */
     public void recordLogin(UUID playerUuid, String ipAddress, String fingerprint) {
-        // Track by IP (Redis list — allows counting account associations per IP)
+        // Track by IP with TTL (A-6 — was missing TTL, now auto-expires after 24h)
         String ipKey = KEY_IP_PREFIX + ipAddress;
         redisManager.lpush(ipKey, playerUuid.toString());
-        // Periodic cleanup of old entries is handled by the AuthVelocityPlugin on startup
+        redisManager.expire(ipKey, TTL_SECONDS);
 
-        // Track by fingerprint (if available)
+        // Track by fingerprint with TTL
         if (fingerprint != null && !fingerprint.isEmpty()) {
             String fpKey = KEY_FP_PREFIX + fingerprint;
             redisManager.lpush(fpKey, playerUuid.toString());
-            redisManager.setWithExpiry(fpKey + ":ttl", "1", TTL_SECONDS);
+            redisManager.expire(fpKey, TTL_SECONDS);
         }
 
-        logger.debug("Recorded login: uuid={}, ip={}, fp={}",
-                playerUuid, ipAddress, fingerprint != null ? fingerprint.substring(0, 12) : "null");
+        logger.debug("Recorded login: uuid={}, ip={}, fp={} (TTL: {}h)",
+                playerUuid, ipAddress, fingerprint != null ? fingerprint.substring(0, 12) : "null",
+                TTL_SECONDS / 3600);
     }
 
     /**
@@ -123,9 +126,34 @@ public final class AltDetector {
         return (int) redisManager.llen(KEY_FP_PREFIX + fingerprint);
     }
 
-    /** Cleanup — no persistent state. */
+    // ── Shadow ban (A-4) ──
+
+    /**
+     * Adds a player to the shadow-ban set (silent flagging).
+     * Shadow-banned players can connect but are tracked for staff review.
+     */
+    public void shadowBan(UUID playerUuid) {
+        redisManager.sadd(KEY_SHADOW_BANNED, playerUuid.toString());
+        logger.warn("Player {} has been shadow-banned (silent flag)", playerUuid);
+    }
+
+    /**
+     * Checks if a player is shadow-banned.
+     */
+    public boolean isShadowBanned(UUID playerUuid) {
+        return redisManager.sismember(KEY_SHADOW_BANNED, playerUuid.toString());
+    }
+
+    /**
+     * Returns the count of shadow-banned players.
+     */
+    public long getShadowBanCount() {
+        return redisManager.scard(KEY_SHADOW_BANNED);
+    }
+
+    /** Cleanup — Redis pool managed externally. */
     public void shutdown() {
-        // Redis pool managed externally
+        // No persistent state
     }
 
     // ── Types ──

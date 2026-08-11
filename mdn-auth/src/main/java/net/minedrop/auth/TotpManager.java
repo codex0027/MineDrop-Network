@@ -2,6 +2,7 @@ package net.minedrop.auth;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.zaxxer.hikari.HikariDataSource;
 import net.minedrop.core.redis.RedisManager;
 import org.slf4j.Logger;
 
@@ -12,10 +13,14 @@ import java.nio.charset.StandardCharsets;
 import java.security.InvalidKeyException;
 import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.SQLException;
 import java.time.Instant;
-import java.util.Base64;
-import java.util.HashMap;
-import java.util.Map;
+import java.util.Arrays;
+import java.util.HashSet;
+import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -29,20 +34,26 @@ import java.util.UUID;
 public final class TotpManager {
 
     private static final String REDIS_KEY_PREFIX = "mdn:auth:totp:";
+    private static final String REDIS_FAILED_ATTEMPTS = "mdn:auth:failed:";
     private static final String ISSUER = "MineDropNetwork";
     private static final String ALGORITHM = "HmacSHA1";
     private static final int DIGITS = 6;
     private static final int PERIOD_SECONDS = 30;
     private static final int DRIFT_STEPS = 1; // ±1 step = 30-second tolerance
+    private static final int MAX_FAILED_ATTEMPTS = 5;
+    private static final int FAILED_ATTEMPTS_TTL = 900; // 15 minutes
 
     private final RedisManager redisManager;
     private final ObjectMapper objectMapper;
     private final Logger logger;
+    private final HikariDataSource dataSource; // nullable — MySQL optional on Velocity
 
-    public TotpManager(RedisManager redisManager, ObjectMapper objectMapper, Logger logger) {
+    public TotpManager(RedisManager redisManager, ObjectMapper objectMapper, Logger logger,
+                       HikariDataSource dataSource) {
         this.redisManager = redisManager;
         this.objectMapper = objectMapper;
         this.logger = logger;
+        this.dataSource = dataSource;
     }
 
     // ── Secret generation ──
@@ -67,18 +78,37 @@ public final class TotpManager {
             backupCodes[i] = String.format("%08d", rng.nextInt(100_000_000));
         }
 
-        // Store in Redis (persistent — no TTL, survives restarts)
+        // Store in MySQL for persistence + Redis for fast reads
         TotpRecord record = new TotpRecord();
         record.secret = secret;
         record.backupCodes = String.join(",", backupCodes);
         record.ipLock = null;
         record.createdAt = Instant.now().getEpochSecond();
 
+        // ── MySQL persistence (A-1) ──
+        if (dataSource != null && !dataSource.isClosed()) {
+            try (Connection conn = dataSource.getConnection();
+                 PreparedStatement ps = conn.prepareStatement(
+                     "INSERT INTO mdn_auth_totp (uuid, totp_secret, backup_codes, ip_lock, created_at) " +
+                     "VALUES (?, ?, ?, NULL, NOW()) ON DUPLICATE KEY UPDATE totp_secret=?, backup_codes=?")) {
+                ps.setString(1, playerUuid.toString());
+                ps.setString(2, secret);
+                ps.setString(3, record.backupCodes);
+                ps.setString(4, secret);
+                ps.setString(5, record.backupCodes);
+                ps.executeUpdate();
+                logger.debug("TOTP record persisted to MySQL for {}", playerUuid);
+            } catch (SQLException e) {
+                logger.error("Failed to persist TOTP record to MySQL for {} — falling back to Redis-only", playerUuid, e);
+            }
+        }
+
+        // ── Redis cache ──
         try {
             redisManager.setWithExpiry(
                     REDIS_KEY_PREFIX + playerUuid,
                     objectMapper.writeValueAsString(record),
-                    Integer.MAX_VALUE // effectively persistent
+                    86400 // 24h TTL — MySQL is the source of truth
             );
         } catch (JsonProcessingException e) {
             logger.error("Failed to serialize TOTP record for {}", playerUuid, e);
@@ -139,24 +169,209 @@ public final class TotpManager {
     }
 
     /**
-     * Deletes a player's TOTP secret (admin reset).
+     * Deletes a player's TOTP secret from both MySQL and Redis (admin reset).
      */
     public void deleteSecret(UUID playerUuid) {
+        // Delete from Redis cache
         redisManager.delete(REDIS_KEY_PREFIX + playerUuid);
-        logger.info("TOTP secret deleted for {}", playerUuid);
+
+        // Delete from MySQL
+        if (dataSource != null && !dataSource.isClosed()) {
+            try (Connection conn = dataSource.getConnection();
+                 PreparedStatement ps = conn.prepareStatement(
+                     "DELETE FROM mdn_auth_totp WHERE uuid = ?")) {
+                ps.setString(1, playerUuid.toString());
+                int rows = ps.executeUpdate();
+                logger.info("TOTP secret deleted for {} (MySQL rows: {}, Redis: ok)", playerUuid, rows);
+            } catch (SQLException e) {
+                logger.error("Failed to delete TOTP from MySQL for {} — Redis-only delete", playerUuid, e);
+            }
+        } else {
+            logger.info("TOTP secret deleted for {} (Redis-only)", playerUuid);
+        }
     }
 
     /**
-     * Retrieves the stored TOTP record from Redis.
+     * Retrieves the stored TOTP record — Redis cache first, MySQL fallback.
      */
     private TotpRecord getRecord(UUID playerUuid) {
+        // Try Redis cache first
         String json = redisManager.get(REDIS_KEY_PREFIX + playerUuid);
-        if (json == null || json.isEmpty()) return null;
+        if (json != null && !json.isEmpty()) {
+            try {
+                TotpRecord record = objectMapper.readValue(json, TotpRecord.class);
+                if (record.secret != null) return record;
+            } catch (JsonProcessingException e) {
+                logger.debug("Corrupt Redis TOTP cache for {} — trying MySQL", playerUuid);
+            }
+        }
+
+        // Fall back to MySQL
+        if (dataSource != null && !dataSource.isClosed()) {
+            try (Connection conn = dataSource.getConnection();
+                 PreparedStatement ps = conn.prepareStatement(
+                     "SELECT totp_secret, backup_codes, ip_lock, UNIX_TIMESTAMP(created_at) " +
+                     "FROM mdn_auth_totp WHERE uuid = ?")) {
+                ps.setString(1, playerUuid.toString());
+                try (ResultSet rs = ps.executeQuery()) {
+                    if (rs.next()) {
+                        TotpRecord record = new TotpRecord();
+                        record.secret = rs.getString("totp_secret");
+                        record.backupCodes = rs.getString("backup_codes");
+                        record.ipLock = rs.getString("ip_lock");
+                        record.createdAt = rs.getLong(4);
+                        // Repopulate Redis cache
+                        redisManager.setWithExpiry(REDIS_KEY_PREFIX + playerUuid,
+                                objectMapper.writeValueAsString(record), 86400);
+                        return record;
+                    }
+                }
+            } catch (SQLException | JsonProcessingException e) {
+                logger.error("Failed to read TOTP from MySQL for {}", playerUuid, e);
+            }
+        }
+
+        return null;
+    }
+
+    // ── IP lock enforcement (A-2) ──
+
+    /**
+     * Verifies a TOTP code AND enforces IP lock if configured.
+     * <p>
+     * If {@code enforceIpLock} is true and the stored record has an ipLock,
+     * the player's current IP must match the stored ipLock.
+     *
+     * @param playerUuid  the player's UUID
+     * @param code        the 6-digit code
+     * @param currentIp   the player's current IP address
+     * @param enforceIpLock whether to check IP lock
+     * @return {@link IpVerifyResult} with success/failure and reason
+     */
+    public IpVerifyResult verifyCodeWithIpLock(UUID playerUuid, int code, String currentIp,
+                                                boolean enforceIpLock) {
+        // Rate-limit failed attempts
+        String failKey = REDIS_FAILED_ATTEMPTS + playerUuid;
+        String failCount = redisManager.get(failKey);
+        int attempts = failCount != null ? Integer.parseInt(failCount) : 0;
+        if (attempts >= MAX_FAILED_ATTEMPTS) {
+            logger.warn("TOTP brute-force lockout for {} ({} failed attempts)", playerUuid, attempts);
+            return IpVerifyResult.RATE_LIMITED;
+        }
+
+        TotpRecord record = getRecord(playerUuid);
+        if (record == null || record.secret == null) {
+            return IpVerifyResult.NO_SECRET;
+        }
+
+        // ── IP lock check (A-2) ──
+        if (enforceIpLock && record.ipLock != null && !record.ipLock.isEmpty()) {
+            String storedIpPrefix = extractIpPrefix(record.ipLock);
+            String currentIpPrefix = extractIpPrefix(currentIp);
+            if (!storedIpPrefix.equals(currentIpPrefix)) {
+                logger.warn("IP lock mismatch for {}: stored={}, current={}",
+                        playerUuid, storedIpPrefix, currentIpPrefix);
+                return IpVerifyResult.IP_MISMATCH;
+            }
+        }
+
+        // ── TOTP code verification ──
         try {
-            return objectMapper.readValue(json, TotpRecord.class);
+            byte[] key = base32Decode(record.secret);
+            long counter = Instant.now().getEpochSecond() / PERIOD_SECONDS;
+
+            for (int offset = -DRIFT_STEPS; offset <= DRIFT_STEPS; offset++) {
+                int expected = generateTotp(key, counter + offset);
+                if (expected == code) {
+                    // Success — clear failed attempts
+                    redisManager.delete(failKey);
+                    logger.debug("TOTP verification succeeded for {} (drift offset: {})", playerUuid, offset);
+                    return IpVerifyResult.SUCCESS;
+                }
+            }
+
+            // Failed — increment counter
+            redisManager.setWithExpiry(failKey, String.valueOf(attempts + 1), FAILED_ATTEMPTS_TTL);
+            logger.debug("TOTP verification failed for {} (attempt {}/{})",
+                    playerUuid, attempts + 1, MAX_FAILED_ATTEMPTS);
+            return IpVerifyResult.INVALID_CODE;
+        } catch (Exception e) {
+            logger.error("TOTP verification error for {}", playerUuid, e);
+            return IpVerifyResult.ERROR;
+        }
+    }
+
+    private static String extractIpPrefix(String ip) {
+        if (ip == null) return "";
+        int lastDot = ip.lastIndexOf('.');
+        return lastDot > 0 ? ip.substring(0, lastDot) : ip;
+    }
+
+    // ── Backup code verification (A-5) ──
+
+    /**
+     * Verifies a backup recovery code and removes it from the stored set.
+     *
+     * @param playerUuid the player's UUID
+     * @param code       the 8-digit backup code
+     * @return true if the code was valid and has been consumed
+     */
+    public boolean verifyBackupCode(UUID playerUuid, String code) {
+        TotpRecord record = getRecord(playerUuid);
+        if (record == null || record.backupCodes == null) {
+            return false;
+        }
+
+        Set<String> codes = new HashSet<>(Arrays.asList(record.backupCodes.split(",")));
+        if (!codes.contains(code)) {
+            logger.debug("Invalid backup code attempt for {}", playerUuid);
+            return false;
+        }
+
+        // Remove the used code
+        codes.remove(code);
+        record.backupCodes = String.join(",", codes);
+
+        // Persist updated codes to both stores
+        saveRecord(playerUuid, record);
+        logger.info("Backup code consumed for {} — {} codes remaining", playerUuid, codes.size());
+        return true;
+    }
+
+    /**
+     * Persists a TOTP record to both Redis and MySQL.
+     */
+    private void saveRecord(UUID playerUuid, TotpRecord record) {
+        try {
+            redisManager.setWithExpiry(REDIS_KEY_PREFIX + playerUuid,
+                    objectMapper.writeValueAsString(record), 86400);
         } catch (JsonProcessingException e) {
-            logger.error("Failed to deserialize TOTP record for {}", playerUuid, e);
-            return null;
+            logger.error("Failed to save TOTP record to Redis for {}", playerUuid, e);
+        }
+
+        if (dataSource != null && !dataSource.isClosed()) {
+            try (Connection conn = dataSource.getConnection();
+                 PreparedStatement ps = conn.prepareStatement(
+                     "UPDATE mdn_auth_totp SET backup_codes = ?, ip_lock = ? WHERE uuid = ?")) {
+                ps.setString(1, record.backupCodes);
+                ps.setString(2, record.ipLock);
+                ps.setString(3, playerUuid.toString());
+                ps.executeUpdate();
+            } catch (SQLException e) {
+                logger.error("Failed to update TOTP record in MySQL for {}", playerUuid, e);
+            }
+        }
+    }
+
+    /**
+     * Updates the IP lock on a TOTP record (called on first successful 2FA verify).
+     */
+    public void updateIpLock(UUID playerUuid, String ipAddress) {
+        TotpRecord record = getRecord(playerUuid);
+        if (record != null) {
+            record.ipLock = ipAddress;
+            saveRecord(playerUuid, record);
+            logger.info("IP lock set for {} → {}", playerUuid, extractIpPrefix(ipAddress));
         }
     }
 
@@ -234,9 +449,20 @@ public final class TotpManager {
         return result;
     }
 
-    /** Cleanup — no-op currently. */
+    /** Cleanup — Redis + MySQL pools managed externally. */
     public void shutdown() {
-        // Redis pool managed externally
+        // Resources managed by RedisManager and MDNAPI
+    }
+
+    // ── IP Verify Result enum (A-2) ──
+
+    public enum IpVerifyResult {
+        SUCCESS,
+        INVALID_CODE,
+        IP_MISMATCH,
+        RATE_LIMITED,
+        NO_SECRET,
+        ERROR
     }
 
     // ── Data classes ──

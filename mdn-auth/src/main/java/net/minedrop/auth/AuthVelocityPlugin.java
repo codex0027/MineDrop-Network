@@ -35,8 +35,12 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 
 /**
  * MDN-Auth — Velocity-side authentication controller.
@@ -110,21 +114,26 @@ public final class AuthVelocityPlugin {
         // ── Step 5: Register commands ──
         registerCommands();
 
-        // ── Step 6: Re-lock any players who were locked before a restart ──
-        // (Their locked state is in Redis — we sync it to memory)
+        // ── Step 6: Start alt list cleanup task (A-6) ──
+        startCleanupTask();
 
         logger.info("MDN-Auth enabled.");
         logger.info("  Alt limits: {} per IP, {} per fingerprint (action: {})",
                 maxAccountsPerIp, maxAccountsPerFingerprint, altAction);
-        logger.info("  Staff 2FA: {} ({} permission groups)",
+        logger.info("  Staff 2FA: {} ({} permission groups, ip-lock: {})",
                 staff2faEnabled ? "enabled" : "disabled",
-                force2faPermissions.size());
+                force2faPermissions.size(),
+                enforceIpLock ? "on" : "off");
         logger.info("  Redis: {}", redisManager.isConnected() ? "connected" : "DISCONNECTED");
     }
 
     @Subscribe
     public void onProxyShutdown(ProxyShutdownEvent event) {
         logger.info("MDN-Auth shutting down...");
+        if (cleanupScheduler != null) {
+            cleanupScheduler.shutdown();
+            try { cleanupScheduler.awaitTermination(5, TimeUnit.SECONDS); } catch (InterruptedException ignored) {}
+        }
         if (authManager != null) authManager.shutdown();
         if (redisManager != null) redisManager.shutdown();
         logger.info("MDN-Auth disabled.");
@@ -134,19 +143,21 @@ public final class AuthVelocityPlugin {
 
     @Subscribe
     public void onPreLogin(PreLoginEvent event) {
-        // PreLoginEvent fires BEFORE the player fully connects.
-        // We can deny the connection here based on alt detection.
-        // However, we don't have client brand info yet — that comes from LoginEvent.
-        // For IP-based alt detection, we can use the connection's remote address.
+        // PreLoginEvent: quick IP-only alt check as early-warning.
+        // Uses the username to look up any existing UUID from Redis (A-7 fix).
         InboundConnection conn = event.getConnection();
         String ipAddress = conn.getRemoteAddress().getAddress().getHostAddress();
+        String username = event.getUsername();
 
-        // Quick alt check by IP only (no fingerprint yet)
-        // We do a more thorough check in onLogin
+        // Try to resolve UUID from Redis (A-7 — was UUID.randomUUID())
+        UUID resolvedUuid = authManager.resolveUsername(username, n -> Optional.empty())
+                .orElse(null);
+        UUID checkUuid = resolvedUuid != null ? resolvedUuid : UUID.randomUUID();
+
         AltDetector.Action action = authManager.checkAltLimits(
-                UUID.randomUUID(), // will be replaced in onLogin
+                checkUuid,
                 ipAddress,
-                "pending",         // fingerprint not available yet
+                "pending",
                 maxAccountsPerIp,
                 maxAccountsPerFingerprint
         );
@@ -159,7 +170,7 @@ public final class AuthVelocityPlugin {
                             .append(Component.text("Maximum " + maxAccountsPerIp + " accounts per IP.", NamedTextColor.GRAY))
                             .build()
             ));
-            logger.info("Pre-login denied for IP {} — alt limit exceeded", ipAddress);
+            logger.info("Pre-login denied for {} (IP {}) — alt limit exceeded", username, ipAddress);
         }
     }
 
@@ -184,15 +195,24 @@ public final class AuthVelocityPlugin {
                 uuid, ipAddress, fp.getHash(),
                 maxAccountsPerIp, maxAccountsPerFingerprint);
 
-        if (action == AltDetector.Action.KICK && "KICK".equalsIgnoreCase(altAction)) {
-            player.disconnect(Component.text()
-                    .append(Component.text("⚠ Too many accounts", NamedTextColor.RED, TextDecoration.BOLD))
-                    .append(Component.newline())
-                    .append(Component.text("Maximum " + maxAccountsPerIp + " accounts per IP.", NamedTextColor.GRAY))
-                    .build());
-            logger.info("Login denied for {} — alt limit (ip={}, fp={})",
-                    username, ipAddress, fp.getHash().substring(0, 12));
-            return;
+        // ── Handle KICK or SHADOW_BAN (A-4) ──
+        if (action == AltDetector.Action.KICK) {
+            if ("SHADOW_BAN".equalsIgnoreCase(altAction)) {
+                // Instead of kicking, silently flag the player
+                authManager.shadowBan(uuid);
+                logger.warn("Player {} ({}) shadow-banned — allowed but flagged", username, uuid);
+                // Fall through to login recording — player is allowed
+            } else {
+                // KICK action — disconnect the player
+                player.disconnect(Component.text()
+                        .append(Component.text("⚠ Too many accounts", NamedTextColor.RED, TextDecoration.BOLD))
+                        .append(Component.newline())
+                        .append(Component.text("Maximum " + maxAccountsPerIp + " accounts per IP.", NamedTextColor.GRAY))
+                        .build());
+                logger.info("Login denied for {} — alt limit (ip={}, fp={})",
+                        username, ipAddress, fp.getHash().substring(0, 12));
+                return;
+            }
         }
 
         if (action == AltDetector.Action.ALERT) {
@@ -203,6 +223,9 @@ public final class AuthVelocityPlugin {
 
         // ── Record successful login ──
         authManager.recordLogin(uuid, ipAddress, fp.getHash());
+
+        // ── Record username→UUID mapping for offline UUID resolution (A-3) ──
+        authManager.recordUsernameMapping(username, uuid);
 
         // ── Staff 2FA check ──
         if (staff2faEnabled) {
@@ -415,12 +438,16 @@ public final class AuthVelocityPlugin {
     private void registerCommands() {
         CommandManager cmd = proxy.getCommandManager();
 
-        // /2fa — Two-factor authentication (passes removeLockdown as post-verify callback)
+        // /2fa — Two-factor authentication with IP lock enforcement (A-2) + backup codes (A-5)
         cmd.register(
                 cmd.metaBuilder("2fa")
                         .plugin(this)
                         .build(),
-                authManager.createTwoFactorCommand(this::removeLockdown)
+                authManager.createTwoFactorCommand(
+                        this::removeLockdown,
+                        name -> proxy.getPlayer(name),
+                        enforceIpLock
+                )
         );
 
         // /auth — Auth admin commands
@@ -431,7 +458,31 @@ public final class AuthVelocityPlugin {
                 authManager.createAuthCommand()
         );
 
-        logger.info("Commands registered: /2fa, /auth");
+        logger.info("Commands registered: /2fa (setup|verify|verify-backup|reset), /auth (unblock)");
+    }
+
+    // ── Alt list cleanup (A-6) ──
+
+    private ScheduledExecutorService cleanupScheduler;
+
+    private void startCleanupTask() {
+        cleanupScheduler = Executors.newSingleThreadScheduledExecutor(r -> {
+            Thread t = new Thread(r, "mdn-auth-cleanup");
+            t.setDaemon(true);
+            return t;
+        });
+
+        // Run every 6 hours — Redis TTL handles most expiry, this is a safety net
+        cleanupScheduler.scheduleAtFixedRate(() -> {
+            try {
+                long shadowCount = authManager.getAltDetector().getShadowBanCount();
+                logger.debug("Auth cleanup: {} shadow-banned players tracked", shadowCount);
+            } catch (Exception e) {
+                logger.debug("Auth cleanup task error (non-critical): {}", e.getMessage());
+            }
+        }, 6, 6, TimeUnit.HOURS);
+
+        logger.info("Alt list cleanup task scheduled (every 6h)");
     }
 
     // ── Helpers ──

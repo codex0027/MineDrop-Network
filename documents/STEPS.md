@@ -2,7 +2,7 @@
 
 > **Purpose**: Every single change — no matter how small — is logged here chronologically.  
 > **For**: New developers onboarding, debugging "why was this done this way", and auditing changes.  
-> **Last Updated**: August 6, 2026 — signature auto-gen + Velocity allowed-hashes + server eviction fix
+> **Last Updated**: August 6, 2026 — MDN-Auth plugin #4 implemented + spec comparison audit
 
 ---
 
@@ -611,6 +611,103 @@ Both plugins verified with `debug-mode: false` + real `allowed-build-hashes`:
 
 ---
 
+## Phase 11 — MDN-Auth Plugin #4 Implementation (Commit: `2a4a469`)
+
+### Step 11.1 — Build Configuration
+
+Matched the established monorepo conventions from mdn-bridge/mdn-core:
+- Shadow JAR with `com.gradleup.shadow`, Java 21 toolchain
+- Relocates Jackson (`net.minedrop.libs.jackson`), HikariCP, Jedis
+- Excludes `net/minedrop/bridge/**` + `net/minedrop/core/**` (loaded from own JARs)
+- `archiveClassifier.set("original")` on jar task (prevents shadow overwrite bug)
+- `generateSignature` task with sorted-entry hashing + Python ZIP_STORED injection
+- `duplicatesStrategy = DuplicatesStrategy.EXCLUDE` on jar + processResources
+
+| # | Change | File | Details |
+|---|--------|------|---------|
+| 105 | Created build.gradle.kts | `mdn-auth/build.gradle.kts` | Full build config: shadow plugin, deps (Velocity API, Jackson, Jedis, HikariCP), SLF4J compileOnly (not bundled — Velocity provides it), signature generation |
+
+### Step 11.2 — Core Auth Classes (7 files)
+
+| # | Change | File | Details |
+|---|--------|------|---------|
+| 106 | AuthManager | `AuthManager.java` | Central coordinator: owns TotpManager, DeviceFingerprinter, AltDetector. Player locking/unlocking (pre-auth state). BridgeManager self-registration for signature verification. Facade for the Velocity plugin. |
+| 107 | TotpManager | `TotpManager.java` | RFC 6238 TOTP: SecureRandom 20-byte secrets, Base32 encoding, HmacSHA1, 6-digit codes, 30s period, ±1 step drift buffer. 8 backup codes generated. Redis storage: `mdn:auth:totp:<uuid>` → JSON. otpauth:// URL generation for QR codes. |
+| 108 | DeviceFingerprinter | `DeviceFingerprinter.java` | SHA-256 composite hash: client brand + protocol version + IP prefix (first 3 octets). Player UUID NOT included in hash (fingerprints must match across accounts for alt detection). IPv6 returns full address (no dot-separated octets). |
+| 109 | AltDetector | `AltDetector.java` | Redis-backed IP/fingerprint → UUID tracking. Key schema: `mdn:auth:alt:ip:<ip>`, `mdn:auth:alt:fp:<hash>`, `mdn:auth:unblocked:<ip>`. ALLOW/KICK/ALERT/SHADOW_BAN actions. IP whitelist via `/auth unblock`. |
+| 110 | TwoFactorCommand | `TwoFactorCommand.java` | `/2fa setup` — generates QR link with clickable URL; `/2fa verify <code>` — parses int, verifies TOTP, calls removeLockdown callback on success; `/2fa reset <player>` — stub (needs DB-backed UUID lookup). Permission: verify has no perm requirement (usable while locked). |
+| 111 | AuthCommand | `AuthCommand.java` | `/auth unblock <ip>` — IPv4 regex validation, calls AltDetector.unblockIp(). Requires `mdn.auth.admin.unblock` permission. |
+
+### Step 11.3 — Velocity Plugin Main Class
+
+| # | Change | File | Details |
+|---|--------|------|---------|
+| 112 | AuthVelocityPlugin | `AuthVelocityPlugin.java` | Full Velocity lifecycle: `@Plugin` with dependencies on mdn-bridge + mdn-core. 6-step `onProxyInitialize()`: saveDefaultConfig → loadConfiguration → initRedis → AuthManager.init → registerCommands → log status. Event handlers: PreLoginEvent (early IP alt check), LoginEvent (fingerprint + full alt check + staff 2FA check), DisconnectEvent (cleanup locked players). Pre-auth lockdown: title overlay + persistent action bar + limbo state. removeLockdown callback clears title + routes to lobby. `saveDefaultConfig()` copies config.yml from JAR on first startup. Config parser reads all sections (redis, alt-detection, staff-2fa, private-lobbies). |
+
+### Step 11.4 — Config & Resources
+
+| # | Change | File | Details |
+|---|--------|------|---------|
+| 113 | Default config | `config.yml` | Matches design spec exactly: redis.host/port/password, auth.alt-detection (max-accounts-per-ip: 3, max-accounts-per-fingerprint: 2, action: KICK), auth.staff-2fa (enabled, enforce-ip-lock, totp-issuer, force-for-permissions), auth.private-lobbies (token-lifetime-seconds: 60, secret-hashing-algorithm: SHA-256) |
+| 114 | Removed manual velocity-plugin.json | Deleted file | Annotation processor auto-generates from `@Plugin` — prevents duplicate resource bug (Phase 7 pattern) |
+
+### Step 11.5 — Build Fixes (Skeleton Plugins)
+
+While building mdn-auth, discovered pre-existing issues in all 6 skeleton plugins:
+
+| # | Change | Files | Details |
+|---|--------|-------|---------|
+| 115 | Missing `version` in expand() | 6 skeleton `build.gradle.kts` | `filesMatching("plugin.yml") { expand("mainClass" to ..., "version" to project.version) }` — `plugin.yml` templates contained `${version}` placeholder but expand() didn't pass version |
+| 116 | Duplicate velocity-plugin.json | `mdn-communication`, `mdn-maintenance` | Deleted manual templates — `@Plugin` annotation processor auto-generates (Phase 7 pattern) |
+| 117 | Removed stale expand blocks | `mdn-communication/build.gradle.kts`, `mdn-maintenance/build.gradle.kts` | Removed `filesMatching("velocity-plugin.json")` expand blocks after template deletion |
+
+### Step 11.6 — Code Review Fixes
+
+Issues found by code-reviewer-deepseek and fixed before commit:
+
+| # | Change | File | Details |
+|---|--------|------|---------|
+| 118 | Wired removeLockdown callback | `TwoFactorCommand.java`, `AuthVelocityPlugin.java` | TwoFactorCommand now accepts `Consumer<Player>` — on successful 2FA verify, calls `onVerified.accept(player)` which triggers `removeLockdown()` in AuthVelocityPlugin (clears title, routes to lobby). Previously the player would pass 2FA but remain stuck in limbo. |
+| 119 | Removed UUID from fingerprint | `DeviceFingerprinter.java` | `playerUuid` was included in the composite hash, making fingerprints unique per player — defeating alt detection (same device, different account = different fingerprint). Now only uses client brand + protocol version + IP prefix. |
+| 120 | Removed dead lock code | `AltDetector.java` | Old `:write_lock` suffix pattern removed — was never functional. |
+
+### Step 11.7 — Build Verification
+
+```
+mdn-auth:compileJava ✅
+mdn-auth:shadowJar ✅ (4.0 MB, 2,400+ entries)
+mdn-auth signature.json ✅ (auto-generated with sorted-entry hash)
+velocity-plugin.json ✅ (1 entry — annotation-generated)
+config.yml in JAR ✅
+No bridge/core class leaks ✅
+All 4 plugins build ✅ (mdn-api, mdn-bridge, mdn-core, mdn-auth)
+```
+
+### Step 11.8 — Spec Comparison Audit
+
+Compared implementation against `plan/MineDrop/plugins/03_MDN_Auth.md`:
+
+| Requirement | Status |
+|-------------|--------|
+| Velocity-only plugin | ✅ |
+| Device fingerprinting | ✅ SHA-256: brand + protocol + IP prefix |
+| Staff 2FA (TOTP) | ✅ RFC 6238, ±1 drift, QR URL, backup codes |
+| Alt detection (IP + FP) | ✅ Redis lists, whitelist, ALLOW/KICK/ALERT |
+| Config matches spec | ✅ All fields identical |
+| 4 commands + permissions | ✅ /2fa setup|verify|reset, /auth unblock |
+| Pre-auth lockdown | ✅ Title overlay, action bar, limbo state |
+| TOTP time drift | ✅ ±1 step (30s tolerance) |
+| Database schema (SQL) | ❌ Redis-only — no MySQL `mdn_auth_totp` table |
+| IP lock enforcement | ⚠️ Parsed but never checked on verify |
+| /2fa reset full impl | ⚠️ Stub — no username→UUID resolution |
+| SHADOW_BAN action | ⚠️ Enum exists, never used |
+| Backup code verification | ❌ No `/2fa verify-backup` command |
+| Alt list TTL cleanup | ⚠️ Lists grow indefinitely |
+
+**Gaps documented as**: ISSUES.md A-1 through A-7
+
+---
+
 ## Summary Statistics
 
 ### By Phase
@@ -627,7 +724,8 @@ Both plugins verified with `debug-mode: false` + real `allowed-build-hashes`:
 | Phase 8 (Velocity Config Bootstrap) | 1 | 0 | 2 | 0 |
 | Phase 9 (Handshake + Signature) | 1 | 0 | 8 | 0 |
 | Phase 10 (Race + Hash Fixes) | 1 | 0 | 5 | 0 |
-| **Total** | **10** | **94** | **52** | **12** |
+| Phase 11 (MDN-Auth Plugin #4) | 1 | 8 | 8 | 0 |
+| **Total** | **12** | **102** | **60** | **12** |
 
 *Phase 2 was bundled with Phase 1 commit
 
@@ -637,9 +735,10 @@ Both plugins verified with `debug-mode: false` + real `allowed-build-hashes`:
 | mdn-api | 15 | 2 | 1 | 18 |
 | mdn-bridge | 5 | 0 | 2 | 7 |
 | mdn-core | 15 | 1 | 2 | 18 |
+| mdn-auth | 7 | 0 | 1 | 8 |
 | 7 skeletons | 14 | 0 | 0 | 14 |
 | Root docs | DIARY, STEPS, SUGGEST, TIMELINE, README, DEPLOY, FIX-GUIDE, ISSUES | — | — | 8 |
-| **Total** | **49** | **3** | **3** | **63** |
+| **Total** | **56** | **3** | **4** | **71** |
 
 *Note: Two config files (velocity-plugin.json) were removed in Phase 7 — Velocity metadata is now 100% annotation-driven. Phase 8 connected the existing Velocity config files to the startup bootstrap — plugins now create data dirs and copy defaults on first run.*
 

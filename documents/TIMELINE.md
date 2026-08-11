@@ -1,7 +1,7 @@
 # MineDrop Network — Development Timeline
 
 > **Purpose**: Visual roadmap of everything we've built, are building, and will build.  
-> **Last Updated**: August 6, 2026 — signature auto-gen + Velocity allowed-hashes + server eviction fix
+> **Last Updated**: August 6, 2026 — MDN-Auth plugin #4 implemented + spec comparison audit
 
 ---
 
@@ -10,13 +10,13 @@
 ```
 2026-08-04 ───────────────────────────────────────────────────────► 2026-08-05 ──► Future
 
-[Phase 0-4]   [Phase 5-6]    [Phase 7-8]        [Phase 9]
-Foundation →  Startup Fix →  JSON+Config →  Handshake+Signature
- (6.5 hours)   (2.5 hours)     (50 min)      (2 hours)
-    ✅ Done       ✅ Done         ✅ Done        ✅ Done
+[Phase 0-4]   [Phase 5-6]    [Phase 7-8]        [Phase 9-10]    [Phase 11]
+Foundation →  Startup Fix →  JSON+Config →  Handshake+Sig →  MDN-Auth #4
+ (6.5 hours)   (2.5 hours)     (50 min)      (3 hours)        (2 hours)
+    ✅ Done       ✅ Done         ✅ Done        ✅ Done          ✅ Done
 
                                                                               ▼
-                                                                     [Phase 11] ───► [Phase 12]
+                                                                     [Phase 12] ───► [Phase 13]
                                                                       Planned         Dreams
 ```
 
@@ -192,6 +192,42 @@ Verified on live servers: Paper 26.2 + Velocity 4.1.0
 
 ---
 
+### Phase 11 — MDN-Auth Plugin #4 Implementation
+**Duration**: ~2 hours  
+**Date**: August 6, 2026  
+**Commit**: `2a4a469` (16 files, +1,200/-50)
+
+```
+New plugin:
+  ✅ AuthManager               (central coordinator, pre-auth lockdown)
+  ✅ TotpManager               (RFC 6238 TOTP, QR codes, backup codes, ±1 drift)
+  ✅ DeviceFingerprinter        (SHA-256: brand + protocol + IP prefix)
+  ✅ AltDetector               (Redis IP/fingerprint tracking, whitelist)
+  ✅ AuthVelocityPlugin         (6-step init, 4 event handlers, config bootstrap)
+  ✅ TwoFactorCommand           (/2fa setup|verify|reset)
+  ✅ AuthCommand                (/auth unblock <ip>)
+  ✅ config.yml                 (matches design spec exactly)
+  ✅ build.gradle.kts           (shadow JAR, signature, exclusions, relocate)
+
+Build fixes:
+  ✅ 6 skeleton plugin.yml expand() missing version
+  ✅ 2 skeleton duplicate velocity-plugin.json deleted
+  ✅ 2 stale expand blocks removed
+
+Code review fixes:
+  ✅ removeLockdown callback wired (player no longer stuck after 2FA)
+  ✅ UUID removed from fingerprint (alt detection now works correctly)
+  ✅ Dead lock code removed from AltDetector
+
+Spec comparison:
+  ⚠️ 7 gaps found (ISSUES.md A-1 to A-7): no SQL table, IP lock stub,
+     /2fa reset stub, SHADOW_BAN unused, no backup code verify, alt list no TTL
+
+Status: ✅ JAR 4.0MB, signature verified, all 4 plugins building
+```
+
+---
+
 ### Phase 10 — Handshake Race Fix & Signature Hash Fix
 **Duration**: ~1 hour  
 **Date**: August 5, 2026  
@@ -247,42 +283,45 @@ Status: ✅ Config now works on Velocity exactly like Paper
 
 ---
 
-## 🔜 Upcoming — Phase 11 (Planned)
+## 🔜 Upcoming — Phase 12 (Planned)
 
 **Target**: Next development session  
-**Focus**: Rate Limiting + Graceful Degradation
+**Focus**: MDN-Auth gap fixes + Database schema completion
 
 ```
 Planned work:
-  🔜 Rate Limiter              Per-IP/player limits on packet publishing
-  🔜 Graceful Degradation      Local-only mode when Redis is down
-  🔜 Local Event Bus           In-process pub/sub without Redis
-  🔜 Connection Pool Metrics   HikariCP stats in /mdn health
-  🔜 DB Migration Framework    Auto-run schema changes
+  🔜 MDN-Auth SQL schema       Add mdn_auth_totp table to DatabaseSchema
+  🔜 IP lock enforcement       Check IP on 2FA verify, re-auth on IP change
+  🔜 /2fa reset full impl      Database-backed username→UUID resolution
+  🔜 Backup code verification  /2fa verify-backup <code> command
+  🔜 Alt list TTL cleanup      24h expiry on IP/fingerprint Redis lists
+  🔜 SHADOW_BAN implementation Silent flagging + staff alerts
 
 Estimated effort: 2-3 hours
 ```
 
 ---
 
-## 📋 Phase 12 — Future (Medium Term)
+## 📋 Phase 13 — Future (Medium Term)
 
-**Focus**: Monitoring + Developer Tools
+**Focus**: Rate Limiting + Graceful Degradation + Monitoring
 
 ```
 Future work:
+  📋 Rate Limiter              Per-IP/player limits on packet publishing
+  📋 Graceful Degradation      Local-only mode when Redis is down
+  📋 Local Event Bus           In-process pub/sub without Redis
+  📋 Connection Pool Metrics   HikariCP stats in /mdn health
+  📋 DB Migration Framework    Auto-run schema changes
   📋 Prometheus Metrics        /metrics endpoint, Grafana dashboards
   📋 Developer Debug Kit       /mdn debug packets, cache peek, Redis ping
-  📋 Packet Batching           Queue + flush every 50ms for performance
-  📋 Hot-Reload Safety         Clean resource cleanup on reload
-  📋 Structured Logging        JSON format for ELK/Splunk
 
 Estimated effort: 4-6 hours
 ```
 
 ---
 
-## 🌟 Phase 13 — Dreams (Long Term)
+## 🌟 Phase 14 — Dreams (Long Term)
 
 **Focus**: Scale + High Availability
 
@@ -303,16 +342,17 @@ Estimated effort: 8-12 hours (spread across weeks)
 
 | Metric | Count |
 |--------|-------|
-| Total commits | 11 |
+| Total commits | 12 |
 | Total files created | 94 |
 | Total source lines | ~5,700 |
 | Total test lines | ~400 |
 | Build errors encountered & fixed | 13 |
 | Unit tests passing | 24/24 |
-| Plugins fully implemented | 3 (mdn-api, mdn-bridge, mdn-core) |
-| Plugins as skeletons | 7 |
-| Suggestions cataloged | 49 |
+| Plugins fully implemented | 4 (mdn-api, mdn-bridge, mdn-core, mdn-auth) |
+| Plugins as skeletons | 6 |
+| Suggestions cataloged | 53 |
 | Documentation pages | 8 (README + 7 docs in documents/) |
+| Spec comparison gaps found | 7 (MDN-Auth — A-1 to A-7) |
 
 ---
 
@@ -327,7 +367,7 @@ Phase 1 (Foundation) — ✅ DONE
   3. MDN-Core      ✅ Implemented
 
 Phase 2 (Global Services) — 🔜 NEXT
-  4. MDN-Auth      ◻ Skeleton ready
+  4. MDN-Auth      ✅ Implemented (Aug 6, 2026)
   5. MDN-Security  ◻ Skeleton ready
   6. MDN-Economy   ◻ Skeleton ready
   7. MDN-Social    ◻ Skeleton ready

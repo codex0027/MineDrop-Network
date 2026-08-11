@@ -1,10 +1,10 @@
 # MineDrop Network — Issues & Improvement Audit
 
 > **Purpose**: Every issue, bug, gap, code smell, and improvement opportunity found during deep analysis.  
-> **Status**: ✅ **ALL 36 ISSUES + 1 BUILD ISSUE FIXED** — August 4, 2026  
-> **Last Deep Audit**: August 5, 2026  
-> **Last Fix**: August 6, 2026 — signature auto-gen + Velocity allowed-hashes + server eviction
-> **Files Audited**: 30 source files across mdn-api, mdn-bridge, mdn-core
+> **Status**: ✅ **46 issues fixed** — 6 MDN-Auth gaps found (spec comparison)  
+> **Last Deep Audit**: August 6, 2026 — MDN-Auth spec-vs-implementation comparison  
+> **Last Fix**: August 6, 2026 — MDN-Auth plugin #4 fully implemented
+> **Files Audited**: 37 source files across mdn-api, mdn-bridge, mdn-core, mdn-auth
 
 ---
 
@@ -17,6 +17,20 @@
 | 🟡 Medium | 15 | 15 ✅ | 0 |
 | 🟢 Low | 7 | 7 ✅ | 0 |
 | **Total** | **46** | **46** | **0** |
+
+### 🆕 MDN-Auth Spec Comparison Gaps (August 6, 2026)
+
+Found during deep comparison of `plan/MineDrop/plugins/03_MDN_Auth.md` vs implementation.
+
+| ID | Severity | Issue | Status |
+|----|----------|-------|--------|
+| A-1 | 🟠 | **Database schema missing** — spec mandates MySQL `mdn_auth_totp` table; TOTP records are Redis-only (data loss on flush) | 📋 Open |
+| A-2 | 🟡 | **IP lock not enforced** — config `enforce-ip-lock: true` parsed but never checked on 2FA verify | 📋 Open |
+| A-3 | 🟡 | **`/2fa reset` is stub** — cannot resolve username→UUID without database lookup | 📋 Open |
+| A-4 | 🟡 | **SHADOW_BAN not implemented** — enum value exists in AltDetector.Action but never used in any code path | 📋 Open |
+| A-5 | 🟡 | **No backup code verification** — 8 backup codes generated but no `/2fa verify-backup <code>` command to use them | 📋 Open |
+| A-6 | 🟢 | **Alt lists grow indefinitely** — `lpush` appends without TTL cleanup; Redis keys never expire | 📋 Open |
+| A-7 | 🟢 | **PreLoginEvent placeholder UUID** — uses `UUID.randomUUID()` instead of actual player UUID (real check happens in onLogin) | 📋 Open |
 
 ### Additional Build Issues (Post-Audit)
 
@@ -108,4 +122,5 @@ mdn-bridge/src/main/java/net/minedrop/bridge/velocity/BridgeVelocityPlugin.java 
 ---
 
 *Audit completed August 5, 2026. 30 files analyzed. 36 issues found + 4 build issues. 40 fixed.*  
-*Build: ✅ All 3 plugins compile + test — zero failures. Handshake verified end-to-end.*
+*MDN-Auth spec comparison: August 6, 2026. 7 gaps found (A-1 to A-7). All open — planned for next session.*  
+*Build: ✅ All 4 plugins compile — mdn-api, mdn-bridge, mdn-core, mdn-auth.*

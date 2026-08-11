@@ -2,7 +2,7 @@
 
 > **Purpose**: Every idea, suggestion, and enhancement — whether implemented, planned, or deferred — is cataloged here.  
 > **For**: Future planning, prioritizing work, and ensuring no good idea gets lost.  
-> **Last Updated**: August 6, 2026 — signature auto-gen + Velocity allowed-hashes + server eviction fix
+> **Last Updated**: August 6, 2026 — MDN-Auth spec comparison + new suggestions (#53-#59)
 
 ---
 
@@ -10,11 +10,11 @@
 
 | Status | Count |
 |--------|-------|
-| ✅ Implemented | 34 |
-| 🔜 Planned (Near Future) | 5 |
+| ✅ Implemented | 35 |
+| 🔜 Planned (Near Future) | 8 |
 | 📋 Future Consideration | 10 |
 | ❌ Rejected / Deferred | 2 |
-| **Total** | **53** |
+| **Total** | **59** |
 
 > **📋 See also**: [ISSUES.md](ISSUES.md) — 36 bugs, gaps, and code smells found during deep audit (Aug 4, 2026)
 
@@ -124,17 +124,26 @@ These are targeted for the next development session.
 
 | # | Suggestion | Priority | Effort | Why It Matters |
 |---|-----------|----------|--------|---------------|
-| 48 | Signature auto-generation for mdn-core — finalizedBy link to generateSignature in build.gradle.kts | Self | `mdn-core/build.gradle.kts` (Phase 11, Step 105) |
-| 49 | Velocity allowed-build-hashes support — BridgeVelocityPlugin reads hashes from config like Paper does | Self | `BridgeVelocityPlugin.java`, `config-velocity.yml` (Phase 11, Steps 106-108) |
-| 50 | Server eviction fix — discoverServers() no longer pre-registers servers (avoids premature EVICTED warning) | Real server logs | `CoreVelocityPlugin.java` (Phase 11, Step 110) |
-| 51 | Startup script rewrite — setsid + Java 25 + wait loops + log capture | Real server logs | `server/startup.sh` (Phase 11, Step 111) |
-| 52 | Remove duplicate BridgeVelocityPlugin self-register call | Code review | `BridgeVelocityPlugin.java` (Phase 11, Step 109) |
+| 53 | **Add MySQL `mdn_auth_totp` table** — spec mandates SQL; TOTP records currently Redis-only (data loss on flush) | 🟠 High | Medium | Data persistence per design spec |
+| 54 | **Enforce IP lock on 2FA** — `enforce-ip-lock: true` parsed but never checked on verify | 🟡 Medium | Low | Session security for staff |
+| 55 | **Full `/2fa reset` implementation** — stub, needs DB-backed username→UUID resolution | 🟡 Medium | Medium | Admin tool completeness |
+| 56 | **Implement SHADOW_BAN action** — enum exists, never used in code paths | 🟢 Low | Low | Silent flagging for suspicious accounts |
+| 57 | **Backup code verification** — no `/2fa verify-backup <code>` command | 🟡 Medium | Low | Player recovery when authenticator app lost |
+| 58 | **Alt list TTL cleanup** — IP/fingerprint Redis lists grow indefinitely | 🟡 Medium | Low | Prevent unbounded Redis memory growth |
+| 59 | **PreLoginEvent use real UUID** — currently uses UUID.randomUUID() placeholder | 🟢 Low | Low | Accuracy of early IP alt check |
 
-### Critical Bug Fixes
+### Other Planned
 
-| # | Suggestion | Source | Implemented In |
-|---|-----------|--------|---------------|
-| 1
+| # | Suggestion | Priority | Effort | Why It Matters |
+|---|-----------|----------|--------|---------------|
+| 50 | Server eviction fix — discoverServers() no longer pre-registers servers | Real server logs | `CoreVelocityPlugin.java` | Avoids premature EVICTED warnings |
+| 51 | Startup script rewrite — setsid + Java 25 + wait loops + log capture | Real server logs | `server/startup.sh` | Reliable server boot process |
+| 52 | Remove duplicate BridgeVelocityPlugin self-register call | Code review | `BridgeVelocityPlugin.java` | Clean startup |
+
+### Future Consideration (reorganized)
+
+| # | Suggestion | Priority | Effort | Why It Matters |
+|---|-----------|----------|--------|---------------|
 | 59 | **Developer Debug Kit** — `/mdn debug packets`, `/mdn debug cache` | 🟢 Low | Medium | Live packet tracing, cache peeking, Redis ping |
 | 60 | **Packet Batching** — queue packets and flush every 50ms | 🟡 Medium | Medium | Reduces Redis roundtrips at scale |
 | 61 | **Plugin Hot-Reload Safety** — clean resource cleanup on reload | 🟢 Low | Medium | Prevent thread/connection leaks on /mdn reload |
@@ -144,6 +153,15 @@ These are targeted for the next development session.
 | 65 | **MySQL Read Replicas** — separate read/write connections | 🟢 Low | Medium | Scale read-heavy operations |
 | 66 | **Webhook Notifications** — configurable webhooks for events | 🟢 Low | Low | Admins get Discord/Slack alerts for key events |
 | 67 | **Admin Dashboard API** — REST endpoints for web admin panel | 🟢 Low | High | Future web-based server management |
+
+---
+
+## 📋 Implemented (MDN-Auth specific)
+
+| # | Suggestion | Source | Implemented In |
+|---|-----------|--------|---------------|
+| 48 | MDN-Auth plugin #4 — TOTP 2FA, alt detection, device fingerprinting, pre-auth lockdown | Design doc | 8 files in `mdn-auth/` (Phase 11, Steps 105-114) |
+| 49 | Velocity allowed-build-hashes support — BridgeVelocityPlugin reads hashes from config like Paper does | Self | `BridgeVelocityPlugin.java`, `config-velocity.yml` |
 
 ---
 
@@ -176,4 +194,4 @@ Ideas considered but decided against (with reasons).
 
 ---
 
-*Last updated: August 6, 2026 — 53 suggestions cataloged*
+*Last updated: August 6, 2026 — 59 suggestions cataloged (35 implemented, 8 planned, 10 future, 2 rejected)*

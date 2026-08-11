@@ -1,8 +1,8 @@
 # MineDrop Network — Development Diary
 
-> **Last Updated**: August 6, 2026 — signature.json auto-gen + Velocity allowed-hashes + server eviction fix  
-> **Build Status**: ✅ Both plugins signature-verified, handshake on attempt 1, no eviction warnings
-> **Branch**: `main` | **Commit**: *(pending push)*
+> **Last Updated**: August 6, 2026 — MDN-Auth plugin #4 implemented + spec comparison audit  
+> **Build Status**: ✅ All 4 plugins building — both signature-verified, handshake on attempt 1
+> **Branch**: `main` | **Commit**: `2a4a469` (MDN-Auth) + *(pending doc update)*
 
 > **📚 Companion Docs**: [STEPS.md](STEPS.md) (step-by-step log) · [SUGGEST.md](SUGGEST.md) (suggestions catalog) · [TIMELINE.md](TIMELINE.md) (roadmap)
 
@@ -19,7 +19,8 @@
 7. [Round 4 — Dead Letter Queue & Operation Timeouts](#round-4--dead-letter-queue--operation-timeouts)
 8. [Round 5 — Velocity Config Bootstrap Fix](#round-5--velocity-config-bootstrap-fix)
 9. [Round 6 — Cross-Server Handshake & Signature Verification](#round-6--cross-server-handshake--signature-verification)
-10. [File Map — Every File Explained](#file-map--every-file-explained)
+10. [Round 7 — MDN-Auth Plugin #4 Implementation](#round-7--mdn-auth-plugin-4-implementation)
+11. [File Map — Every File Explained](#file-map--every-file-explained)
 9. [How to Build](#how-to-build)
 10. [How to Add a New Plugin](#how-to-add-a-new-plugin)
 11. [How to Add a New Feature](#how-to-add-a-new-feature)
@@ -33,7 +34,7 @@
 
 **MineDrop Network** is a Minecraft minigames network running on **Velocity** (proxy) and **Paper** (game servers). The flagship game is **"Steal a Mineling" (SAM)** — a conveyor-belt base-defence PvPvE game never seen before in Minecraft.
 
-The codebase is a **Gradle monorepo** containing 10 plugins. Three are fully implemented with production-grade code, and seven are skeletons waiting for new developers.
+The codebase is a **Gradle monorepo** containing 10 plugins. Four are fully implemented with production-grade code, and six are skeletons waiting for new developers.
 
 ---
 
@@ -66,7 +67,7 @@ MineDrop-Network/
 ├── mdn-bridge/       ★ Security foundation — signature verification, handshake, plugin validation
 ├── mdn-core/         ★ Network heartbeat — sessions, routing, cache, sync, circuit breakers
 │
-├── mdn-auth/         ◻ Skeleton — Authentication & 2FA (Velocity)
+├── mdn-auth/         ★ Authentication — TOTP 2FA, alt detection, device fingerprinting (Velocity)
 ├── mdn-security/     ◻ Skeleton — Anti-cheat & exploit prevention (Paper)
 ├── mdn-economy/      ◻ Skeleton — Coins, auction house, NPC shop (Paper)
 ├── mdn-social/       ◻ Skeleton — Friends & clans (Paper)
@@ -317,6 +318,61 @@ Added `saveDefaultConfig()` methods to both Velocity plugins:
 
 ---
 
+## Round 7 — MDN-Auth Plugin #4 Implementation
+
+**Commit**: `2a4a469`  
+**Date**: August 6, 2026  
+**What was built**: Complete Velocity authentication plugin — plugin #4 of 10
+
+### Architecture
+```
+AuthVelocityPlugin (main entry point)
+├── AuthManager (coordinator)
+│   ├── TotpManager — RFC 6238 TOTP, QR URLs, backup codes, ±1 step drift
+│   ├── DeviceFingerprinter — SHA-256 from client metadata (no UUID in hash)
+│   └── AltDetector — Redis IP/fingerprint tracking + whitelist
+├── TwoFactorCommand — /2fa setup|verify|reset
+└── AuthCommand — /auth unblock <ip>
+```
+
+### Features Implemented
+| Feature | Implementation |
+|---------|---------------|
+| **Staff 2FA** | TOTP with QR codes, 8 backup codes, ±30s drift buffer |
+| **Alt detection** | IP + fingerprint tracking, max-accounts limits, whitelist |
+| **Device fingerprint** | SHA-256: client brand + protocol + IP prefix (no UUID) |
+| **Pre-auth lockdown** | Title overlay, persistent action bar, limbo state on proxy |
+| **Config** | SnakeYAML, saveDefaultConfig, matches design spec exactly |
+| **Bridge registration** | Self-registers for signature verification |
+| **Signature** | auto-generated via sorted-entry hash + Python ZIP_STORED injection |
+
+### Spec Comparison Results
+Compared implementation against `plan/MineDrop/plugins/03_MDN_Auth.md`:
+- ✅ Velocity-only plugin
+- ✅ Device fingerprinting (SHA-256)
+- ✅ Staff 2FA (TOTP with QR codes, backup codes)
+- ✅ Alt detection (IP + fingerprint, ALLOW/KICK/ALERT)
+- ✅ Config matches spec exactly (all fields identical)
+- ✅ 4 commands with correct permissions
+- ✅ Pre-auth lockdown (title overlay, action bar)
+- ✅ TOTP time drift buffer (±1 step)
+- ❌ Database schema — Redis-only, no MySQL `mdn_auth_totp` table
+- ⚠️ IP lock enforcement — parsed but never checked
+- ⚠️ `/2fa reset` — stub (needs DB-backed UUID lookup)
+- ⚠️ SHADOW_BAN — enum exists, never used
+- ❌ Backup code verification — no `/2fa verify-backup` command
+
+**Gaps documented**: ISSUES.md A-1 through A-7 — planned for next session
+
+### Build Quality
+- JAR: 4.0 MB, 2,400+ entries, shadow-relocated dependencies
+- velocity-plugin.json: 1 entry (annotation-generated, no duplicate)
+- signature.json: auto-generated with sorted-entry hash
+- No bridge/core class leaks
+- All 6 skeleton plugin build fixes applied (version in expand, deleted duplicate velocity-plugin.json)
+
+---
+
 ## Round 6 — Cross-Server Handshake & Signature Verification
 
 **Commit**: `ed69f5d`  
@@ -337,7 +393,7 @@ Added `saveDefaultConfig()` methods to both Velocity plugins:
 
 ---
 
-## Round 7 — Signature Auto-Gen + Eviction Fix (August 6, 2026)
+## Round 8 — Signature Auto-Gen + Eviction Fix (August 6, 2026)
 
 **What was changed**:
 
@@ -595,6 +651,15 @@ CircuitBreakerTest (mdn-core) — 7 tests:
 - `PacketDispatcher` — Only dispatches to registered handlers. No built-in handlers registered yet (that's for each plugin to do).
 - `InventorySyncManager` — Stores combined inv+ec as JSON. A proper implementation would store them as separate columns or use Bukkit's native serialization.
 
+### MDN-Auth gaps (found in spec comparison — Round 7)
+- `AuthManager.validateServiceSecret()` — stub, documented TODO for private lobby system (MDN-SAM)
+- `TotpManager` — Stores records in Redis only (no MySQL `mdn_auth_totp` table per design spec)
+- `AltDetector` — IP/fingerprint lists grow indefinitely (no TTL cleanup)
+- `TwoFactorCommand.handleReset()` — stub (cannot resolve username→UUID without database)
+- IP lock (`enforce-ip-lock`) — parsed from config but never checked on 2FA verify
+- SHADOW_BAN action — enum value exists but never used in any code path
+- No `/2fa verify-backup <code>` command — backup codes generated but unusable
+
 ### Future enhancements (not yet implemented)
 - Rate limiter per IP/player on packet publishing
 - Database migration framework (auto-run schema changes)
@@ -652,6 +717,7 @@ CircuitBreakerTest (mdn-core) — 7 tests:
 | 2026-08-04 | `81da386` | Velocity config bootstrap — saveDefaultConfig() for both plugins, config-velocity.yml now copies to disk, routing.default-region path support |
 | 2026-08-05 | `ed69f5d` | Cross-server handshake via Redis Pub/Sub + build-time signature.json generation + ClassLoader conflict fix |
 | 2026-08-05 | `de86137` | Handshake race fix (2s delay → SUCCESS on attempt 1) + signature hash fix (sorted entries + Python injection) + MDN-Core self-registration |
+| 2026-08-06 | `2a4a469` | MDN-Auth plugin #4 — TOTP 2FA, alt detection, device fingerprinting, pre-auth lockdown, 2 commands, config matches spec |
 | 2026-08-06 | *(pending)* | Signature auto-gen finalizedBy link for both bridge + core, Velocity allowed-build-hashes support, server eviction fix (discoverServers no longer pre-registers), startup.sh rewrite, duplicate register removed |
 
 ---

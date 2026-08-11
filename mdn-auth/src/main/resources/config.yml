@@ -1,0 +1,37 @@
+# =============================================================================
+# MDN-Auth Configuration
+# =============================================================================
+# Handles player authentication, device fingerprinting, staff 2FA,
+# alt account detection, and private lobby service-secret validation.
+
+# ── Redis connection ──
+redis:
+  host: "127.0.0.1"
+  port: 6379
+  password: ""
+
+# ── Authentication settings ──
+auth:
+
+  # Alt account detection
+  alt-detection:
+    max-accounts-per-ip: 3
+    max-accounts-per-fingerprint: 2
+    action: "KICK"  # KICK, ALERT, or SHADOW_BAN
+
+  # Staff two-factor authentication
+  staff-2fa:
+    enabled: true
+    # Lock the session to the IP that authenticated
+    enforce-ip-lock: true
+    # The issuer name shown in authenticator apps
+    totp-issuer: "MineDropNetwork"
+    # Permission groups that REQUIRE 2FA before playing
+    force-for-permissions:
+      - "mdn.group.admin"
+      - "mdn.group.staff"
+
+  # Private lobby service-secret validation
+  private-lobbies:
+    token-lifetime-seconds: 60
+    secret-hashing-algorithm: "SHA-256"

@@ -11,6 +11,5 @@ dependencies {
 tasks.shadowJar { archiveClassifier.set(""); relocate("com.fasterxml", "net.minedrop.libs.jackson") }
 tasks.build { dependsOn(tasks.shadowJar) }
 tasks.processResources {
-    filesMatching("plugin.yml") { expand("mainClass" to "net.minedrop.communication.CommunicationPaperPlugin") }
-    filesMatching("velocity-plugin.json") { expand("mainClass" to "net.minedrop.communication.CommunicationVelocityPlugin") }
+    filesMatching("plugin.yml") { expand("mainClass" to "net.minedrop.communication.CommunicationPaperPlugin", "version" to project.version) }
 }

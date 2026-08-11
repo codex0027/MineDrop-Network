@@ -1,1 +1,0 @@
-{"id":"mdn-communication","name":"MDN-Communication","version":"${version}","main":"${mainClass}","dependencies":[{"id":"mdn-core"}],"authors":["MineDrop Network"],"description":"Communication — global chat, private messages, Discord bridge"}

@@ -9,4 +9,4 @@ dependencies {
 }
 tasks.shadowJar { archiveClassifier.set(""); relocate("com.fasterxml", "net.minedrop.libs.jackson") }
 tasks.build { dependsOn(tasks.shadowJar) }
-tasks.processResources { filesMatching("plugin.yml") { expand("mainClass" to "net.minedrop.economy.EconomyPaperPlugin") } }
+tasks.processResources { filesMatching("plugin.yml") { expand("mainClass" to "net.minedrop.economy.EconomyPaperPlugin", "version" to project.version) } }
